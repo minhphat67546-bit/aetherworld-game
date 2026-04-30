@@ -664,6 +664,6 @@ app.get('/{*splat}', (req, res) => {
 // ====== START ======
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🎮 AetherWorld Server đang chạy tại http://localhost:${PORT}`);
-  console.log(`📡 Sẵn sàng nhận kết nối multiplayer!\n`);
+  console.log(`\n🎮 AetherWorld Server đang chạy thành công ở cổng ${PORT}!`);
+  console.log(`🌍 Nếu chạy trên Render, hãy truy cập link onrender.com của bạn.`);
 });
