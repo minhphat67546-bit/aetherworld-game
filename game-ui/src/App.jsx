@@ -142,6 +142,9 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
             width: '100%', height: '100%', objectFit: 'contain',
             filter: 'drop-shadow(0 0 15px rgba(255,0,0,0.6))',
           }} />
+          <div style={{ position: 'absolute', top: -45, left: '50%', transform: 'translateX(-50%)', color: 'white', fontSize: '10px', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.5)', padding: '2px 4px', borderRadius: '4px' }}>
+            [Debug] X: {Math.round(bossPos?.x || 650)} | Y: {Math.round(bossPos?.y || 120)}
+          </div>
           {/* Boss HP bar above boss */}
           {bossHp > 0 && (
             <div style={{ position: 'absolute', top: -25, left: '50%', transform: 'translateX(-50%)', width: '80%' }}>
@@ -428,7 +431,7 @@ export default function App() {
     socket.on('zone_entered', (data) => {
       setActiveZone(data.zone); setBossHp(data.bossHp); setBossHpMax(data.zone.boss.hpMax);
       setBossStatus(data.bossStatus); setPlayersInZone(data.playersInZone);
-      setBossPos({ x: 650, y: 120 });
+      setBossPos({ x: data.bossX !== undefined ? data.bossX : 650, y: data.bossY !== undefined ? data.bossY : 120 });
       setCharacter(prev => prev ? { ...prev, hp: data.player.hp, hpMax: data.player.hpMax } : prev);
       setInitialPos({ x: data.player.x || 150, y: data.player.y || 300 });
       // Load other players already in zone

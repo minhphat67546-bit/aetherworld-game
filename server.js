@@ -380,6 +380,8 @@ io.on('connection', async (socket) => {
       zone: { id: zone.id, name: zone.name, type: zone.type, boss: zone.boss },
       bossHp: freshBoss.hp,
       bossStatus: freshBoss.status,
+      bossX: freshBoss.x,
+      bossY: freshBoss.y,
       player: { hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y },
       playersInZone: zone.type === 'guild' ? getPlayersInZone(zoneId).map(p => p.name) : [player.name],
       otherPlayers
@@ -599,9 +601,15 @@ function updateAndAttack(boss, targetPlayers, zoneId, zone, now, emitter, isGuil
     boss.x += Math.cos(angle) * speed;
     boss.y += Math.sin(angle) * speed;
     
-    if (isGuild) emitter.to(`zone:${zoneId}`).emit('boss_moved', { x: boss.x, y: boss.y, zoneId });
-    else emitter.emit('boss_moved', { x: boss.x, y: boss.y, zoneId });
+    // Prevent NaN
+    if (isNaN(boss.x) || isNaN(boss.y)) {
+      boss.x = 650; boss.y = 120;
+    }
   }
+
+  // Always sync boss position to clients so they don't get stuck at 650,120
+  if (isGuild) emitter.to(`zone:${zoneId}`).emit('boss_moved', { x: boss.x, y: boss.y, zoneId });
+  else emitter.emit('boss_moved', { x: boss.x, y: boss.y, zoneId });
 
   // Attack every 3.5 seconds
   if (!boss.lastAttack) boss.lastAttack = now;
