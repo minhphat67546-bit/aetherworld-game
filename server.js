@@ -108,7 +108,8 @@ io.on('connection', (socket) => {
     combatRating: randomInt(8000, 15000),
     currentZone: null,
     x: 150,
-    y: 300
+    y: 300,
+    isDead: false
   };
   players.set(socket.id, playerData);
 
@@ -193,7 +194,7 @@ io.on('connection', (socket) => {
   // ---- ATTACK BOSS ----
   socket.on('attack', () => {
     const player = players.get(socket.id);
-    if (!player || !player.currentZone) return;
+    if (!player || !player.currentZone || player.isDead) return;
 
     const zoneId = player.currentZone;
     const zone = ZONES[zoneId];
@@ -247,11 +248,9 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Boss counter-attack
+    // Boss counter-attack on the attacker
     const bossDmg = randomInt(zone.boss.attackDmgMin, zone.boss.attackDmgMax);
     player.hp = Math.max(0, player.hp - bossDmg);
-    // Small regen
-    player.hp = Math.min(player.hpMax, player.hp + 500);
 
     socket.emit('boss_attacks_you', {
       bossName: zone.boss.name,
@@ -259,12 +258,42 @@ io.on('connection', (socket) => {
       playerHp: player.hp,
       playerHpMax: player.hpMax
     });
+
+    // Broadcast HP change to others in zone
+    if (zone.type === 'guild') {
+      socket.to(`zone:${zoneId}`).emit('player_hp_update', {
+        name: player.name, hp: player.hp, hpMax: player.hpMax
+      });
+    }
+
+    // Check if player died
+    if (player.hp <= 0 && !player.isDead) {
+      player.isDead = true;
+      socket.emit('you_died', { killedBy: zone.boss.name });
+      if (zone.type === 'guild') {
+        socket.to(`zone:${zoneId}`).emit('player_died_in_zone', { name: player.name });
+      }
+      // Auto respawn after 5 seconds
+      setTimeout(() => {
+        if (!players.has(socket.id)) return;
+        player.isDead = false;
+        player.hp = player.hpMax;
+        player.x = 100 + randomInt(0, 200);
+        player.y = 250 + randomInt(0, 150);
+        socket.emit('you_respawned', { hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y });
+        if (zone.type === 'guild' && player.currentZone === zoneId) {
+          socket.to(`zone:${zoneId}`).emit('player_respawned_in_zone', {
+            name: player.name, hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y
+          });
+        }
+      }, 5000);
+    }
   });
 
   // ---- PLAYER MOVE ----
   socket.on('player_move', (pos) => {
     const player = players.get(socket.id);
-    if (!player || !player.currentZone) return;
+    if (!player || !player.currentZone || player.isDead) return;
     player.x = pos.x;
     player.y = pos.y;
     const zone = ZONES[player.currentZone];
@@ -335,9 +364,8 @@ setInterval(() => {
     const dmg = randomInt(zone.boss.attackDmgMin, zone.boss.attackDmgMax);
     zonePlayers.forEach(p => {
       const playerData = players.get(p.socketId);
-      if (!playerData) return;
+      if (!playerData || playerData.isDead) return;
       playerData.hp = Math.max(0, playerData.hp - dmg);
-      playerData.hp = Math.min(playerData.hpMax, playerData.hp + 300); // small regen
 
       const sock = io.sockets.sockets.get(p.socketId);
       if (sock) {
@@ -348,13 +376,31 @@ setInterval(() => {
           playerHpMax: playerData.hpMax
         });
       }
-    });
 
-    // Broadcast boss attack to zone log
-    io.to(`zone:${zoneId}`).emit('boss_zone_attack', {
-      bossName: zone.boss.name,
-      damage: dmg,
-      targets: zonePlayers.length
+      // Broadcast HP to others
+      io.to(`zone:${zoneId}`).emit('player_hp_update', {
+        name: playerData.name, hp: playerData.hp, hpMax: playerData.hpMax
+      });
+
+      // Check death
+      if (playerData.hp <= 0 && !playerData.isDead) {
+        playerData.isDead = true;
+        if (sock) sock.emit('you_died', { killedBy: zone.boss.name });
+        io.to(`zone:${zoneId}`).emit('player_died_in_zone', { name: playerData.name });
+        setTimeout(() => {
+          if (!players.has(p.socketId)) return;
+          playerData.isDead = false;
+          playerData.hp = playerData.hpMax;
+          playerData.x = 100 + randomInt(0, 200);
+          playerData.y = 250 + randomInt(0, 150);
+          if (sock) sock.emit('you_respawned', { hp: playerData.hp, hpMax: playerData.hpMax, x: playerData.x, y: playerData.y });
+          if (playerData.currentZone === zoneId) {
+            io.to(`zone:${zoneId}`).emit('player_respawned_in_zone', {
+              name: playerData.name, hp: playerData.hp, hpMax: playerData.hpMax, x: playerData.x, y: playerData.y
+            });
+          }
+        }, 5000);
+      }
     });
   });
 }, 4000);

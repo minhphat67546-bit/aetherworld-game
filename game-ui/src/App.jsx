@@ -25,7 +25,7 @@ const ZONE_POSITIONS = {
 };
 
 // ====== GAME ARENA COMPONENT ======
-function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos }) {
+function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos, isDead, deathTimer }) {
   const [playerPos, setPlayerPos] = useState(initialPos || { x: 150, y: 300 });
   const [facing, setFacing] = useState('right');
   const [isMoving, setIsMoving] = useState(false);
@@ -54,6 +54,7 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
       // Space bar attack
       if (e.code === 'Space') {
         e.preventDefault();
+        if (isDead) return;
         const dx = (BOSS_X + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
         const dy = (BOSS_Y + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
         const dist = Math.sqrt(dx*dx + dy*dy);
@@ -80,6 +81,7 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
       const keys = keysRef.current;
       let moving = false;
       setPlayerPos(prev => {
+        if (isDead) return prev;  // Can't move when dead
         let { x, y } = prev;
         if (keys.has('a')) { x -= SPEED; setFacing('left'); moving = true; }
         if (keys.has('d')) { x += SPEED; setFacing('right'); moving = true; }
@@ -100,9 +102,14 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
     };
     animFrame.current = requestAnimationFrame(gameLoop);
     return () => cancelAnimationFrame(animFrame.current);
-  }, []);
+  }, [isDead]);
 
-  // Distance check for attack button
+  // Update position when respawned
+  useEffect(() => {
+    if (!isDead) setPlayerPos(initialPos || { x: 150, y: 300 });
+  }, [isDead, initialPos]);
+
+  // Distance check
   const dx = (BOSS_X + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
   const dy = (BOSS_Y + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
   const distToBoss = Math.sqrt(dx*dx + dy*dy);
@@ -151,7 +158,8 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
           width: PLAYER_SIZE, height: PLAYER_SIZE, zIndex: 3,
           transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)',
           transition: 'transform 0.1s',
-          animation: isMoving ? 'playerBob 0.3s ease-in-out infinite' : 'none',
+          animation: isDead ? 'none' : (isMoving ? 'playerBob 0.3s ease-in-out infinite' : 'none'),
+          filter: isDead ? 'grayscale(1) brightness(0.3)' : 'none',
         }}>
           <img src={PLAYER_IMG} alt="Player" style={{
             width: '100%', height: '100%', objectFit: 'contain',
@@ -181,7 +189,9 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
           }}>
             <img src={PLAYER_IMG} alt={op.name} style={{
               width: '100%', height: '100%', objectFit: 'contain',
-              filter: 'drop-shadow(0 0 6px rgba(6,214,160,0.7)) hue-rotate(120deg)',
+              filter: op.isDead
+                ? 'drop-shadow(0 0 6px rgba(255,0,0,0.5)) grayscale(1) brightness(0.3)'
+                : 'drop-shadow(0 0 6px rgba(6,214,160,0.7)) hue-rotate(120deg)',
             }} />
             <div style={{
               position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
@@ -197,8 +207,24 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
           </div>
         ))}
 
+        {/* Death overlay */}
+        {isDead && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{ fontSize: '4rem', marginBottom: '10px' }}>💀</div>
+            <h2 style={{ fontFamily: "'Cinzel', serif", color: '#ef476f', fontSize: '1.8rem', letterSpacing: '3px' }}>BẠN ĐÃ BỊ TIÊU DIỆT</h2>
+            <p style={{ color: '#ffd166', marginTop: '10px', fontSize: '1.2rem' }}>
+              Hồi sinh sau <span style={{ fontSize: '2rem', fontWeight: 'bold' }}>{deathTimer}</span> giây...
+            </p>
+          </div>
+        )}
+
         {/* Attack range indicator */}
-        {inRange && bossHp > 0 && (
+        {inRange && bossHp > 0 && !isDead && (
           <div style={{
             position: 'absolute', left: playerPos.x + PLAYER_SIZE/2 - 5, top: playerPos.y - 30,
             zIndex: 4, color: '#ffd166', fontSize: '0.75rem', fontWeight: 'bold',
@@ -263,10 +289,10 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
               <div className="progress-bar progress-hp" style={{ width: `${(bossHp/bossHpMax)*100}%` }}></div>
             </div>
           </div>
-          <button className="btn-action" onClick={onAttack} disabled={bossHp <= 0 || isAttacking || !inRange}
-            style={{ opacity: (bossHp <= 0 || isAttacking || !inRange) ? 0.4 : 1, padding: '10px', fontSize: '0.85rem', background: assets.color }}>
+          <button className="btn-action" onClick={onAttack} disabled={bossHp <= 0 || isAttacking || !inRange || isDead}
+            style={{ opacity: (bossHp <= 0 || isAttacking || !inRange || isDead) ? 0.4 : 1, padding: '10px', fontSize: '0.85rem', background: isDead ? '#555' : assets.color }}>
             <Sword size={16} />
-            {bossHp <= 0 ? 'BOSS ĐÃ BỊ TIÊU DIỆT' : !inRange ? 'Lại gần Boss để tấn công...' : 'TẤN CÔNG (SPACE)'}
+            {isDead ? '💀 ĐÃ CHẾT — Đang hồi sinh...' : bossHp <= 0 ? 'BOSS ĐÃ BỊ TIÊU DIỆT' : !inRange ? 'Lại gần Boss để tấn công...' : 'TẤN CÔNG (SPACE)'}
           </button>
         </div>
 
@@ -300,8 +326,10 @@ export default function App() {
   const [playersInZone, setPlayersInZone] = useState([]);
   const [combatLogs, setCombatLogs] = useState([]);
   const [isAttacking, setIsAttacking] = useState(false);
-  const [otherPlayers, setOtherPlayers] = useState({}); // name -> { name, x, y, class, level, hp, hpMax }
+  const [otherPlayers, setOtherPlayers] = useState({});
   const [initialPos, setInitialPos] = useState({ x: 150, y: 300 });
+  const [isDead, setIsDead] = useState(false);
+  const [deathTimer, setDeathTimer] = useState(0);
 
   const addLog = useCallback((text, type = 'system') => {
     setCombatLogs(prev => [{ id: Date.now() + Math.random(), text, type }, ...prev].slice(0, 50));
@@ -351,17 +379,47 @@ export default function App() {
     socket.on('boss_zone_attack', () => {});
     socket.on('boss_killed', (data) => { setBossStatus('Đã bị tiêu diệt'); setBossHp(0); addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}!`, 'system'); });
     socket.on('boss_respawned', (data) => { setBossHp(data.bossHp); setBossStatus('Đang hoạt động'); addLog(`🔥 ${data.bossName} đã hồi sinh!`, 'boss'); });
+
+    // HP sync for other players
+    socket.on('player_hp_update', (data) => {
+      setOtherPlayers(prev => prev[data.name] ? { ...prev, [data.name]: { ...prev[data.name], hp: data.hp, hpMax: data.hpMax } } : prev);
+    });
+
+    // Death & Respawn
+    socket.on('you_died', (data) => {
+      setIsDead(true);
+      setDeathTimer(5);
+      addLog(`☠️ Bạn đã bị ${data.killedBy} tiêu diệt! Hồi sinh sau 5 giây...`, 'boss');
+      // Countdown
+      let t = 5;
+      const interval = setInterval(() => { t--; setDeathTimer(t); if (t <= 0) clearInterval(interval); }, 1000);
+    });
+    socket.on('you_respawned', (data) => {
+      setIsDead(false);
+      setCharacter(prev => prev ? { ...prev, hp: data.hp, hpMax: data.hpMax } : prev);
+      setInitialPos({ x: data.x, y: data.y });
+      addLog(`✨ Bạn đã hồi sinh!`, 'system');
+    });
+    socket.on('player_died_in_zone', (data) => {
+      setOtherPlayers(prev => prev[data.name] ? { ...prev, [data.name]: { ...prev[data.name], hp: 0, isDead: true } } : prev);
+      addLog(`☠️ ${data.name} đã bị tiêu diệt!`, 'boss');
+    });
+    socket.on('player_respawned_in_zone', (data) => {
+      setOtherPlayers(prev => prev[data.name] ? { ...prev, [data.name]: { ...prev[data.name], hp: data.hp, hpMax: data.hpMax, x: data.x, y: data.y, isDead: false } } : prev);
+      addLog(`✨ ${data.name} đã hồi sinh!`, 'guild');
+    });
+
     return () => { socket.removeAllListeners(); };
   }, [character?.name, addLog]);
 
   const enterZone = (zoneId) => socket.emit('enter_zone', zoneId);
   const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); setOtherPlayers({}); };
   const handleAttack = useCallback(() => {
-    if (!activeZone || bossHp <= 0 || isAttacking) return;
+    if (!activeZone || bossHp <= 0 || isAttacking || isDead) return;
     setIsAttacking(true);
     socket.emit('attack');
     setTimeout(() => setIsAttacking(false), 500);
-  }, [activeZone, bossHp, isAttacking]);
+  }, [activeZone, bossHp, isAttacking, isDead]);
 
   // Loading screen
   if (!character) {
@@ -440,6 +498,7 @@ export default function App() {
             character={character} onAttack={handleAttack} isAttacking={isAttacking}
             playersInZone={playersInZone} combatLogs={combatLogs}
             otherPlayersMap={otherPlayers} initialPos={initialPos}
+            isDead={isDead} deathTimer={deathTimer}
           />
         </div>
       )}
