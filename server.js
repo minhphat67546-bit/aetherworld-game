@@ -106,7 +106,9 @@ io.on('connection', (socket) => {
     hp: 48000,
     hpMax: 48000,
     combatRating: randomInt(8000, 15000),
-    currentZone: null
+    currentZone: null,
+    x: 150,
+    y: 300
   };
   players.set(socket.id, playerData);
 
@@ -144,6 +146,8 @@ io.on('connection', (socket) => {
 
     player.currentZone = zoneId;
     player.hp = player.hpMax; // heal on zone entry
+    player.x = 100 + randomInt(0, 200);
+    player.y = 250 + randomInt(0, 150);
     socket.join(`zone:${zoneId}`);
 
     const bossState = getBossState(socket.id, zoneId);
@@ -155,19 +159,32 @@ io.on('connection', (socket) => {
 
     const freshBoss = getBossState(socket.id, zoneId);
 
+    // Build other players list with positions (guild zones only)
+    const otherPlayers = [];
+    if (zone.type === 'guild') {
+      getPlayersInZone(zoneId).forEach(p => {
+        if (p.socketId !== socket.id) {
+          otherPlayers.push({ name: p.name, class: p.class, level: p.level, x: p.x, y: p.y, hp: p.hp, hpMax: p.hpMax });
+        }
+      });
+    }
+
     socket.emit('zone_entered', {
       zoneId,
       zone: { id: zone.id, name: zone.name, type: zone.type, boss: zone.boss },
       bossHp: freshBoss.hp,
       bossStatus: freshBoss.status,
-      player: { hp: player.hp, hpMax: player.hpMax },
-      playersInZone: zone.type === 'guild' ? getPlayersInZone(zoneId).map(p => p.name) : [player.name]
+      player: { hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y },
+      playersInZone: zone.type === 'guild' ? getPlayersInZone(zoneId).map(p => p.name) : [player.name],
+      otherPlayers
     });
 
     // Notify others in guild zone
     if (zone.type === 'guild') {
       socket.to(`zone:${zoneId}`).emit('player_joined_zone', {
-        name: player.name, zoneId,
+        name: player.name, class: player.class, level: player.level,
+        x: player.x, y: player.y, hp: player.hp, hpMax: player.hpMax,
+        zoneId,
         playersInZone: getPlayersInZone(zoneId).map(p => p.name)
       });
     }
@@ -242,6 +259,20 @@ io.on('connection', (socket) => {
       playerHp: player.hp,
       playerHpMax: player.hpMax
     });
+  });
+
+  // ---- PLAYER MOVE ----
+  socket.on('player_move', (pos) => {
+    const player = players.get(socket.id);
+    if (!player || !player.currentZone) return;
+    player.x = pos.x;
+    player.y = pos.y;
+    const zone = ZONES[player.currentZone];
+    if (zone && zone.type === 'guild') {
+      socket.to(`zone:${player.currentZone}`).emit('player_moved', {
+        name: player.name, x: pos.x, y: pos.y
+      });
+    }
   });
 
   // ---- LEAVE ZONE ----

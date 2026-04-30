@@ -25,8 +25,8 @@ const ZONE_POSITIONS = {
 };
 
 // ====== GAME ARENA COMPONENT ======
-function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs }) {
-  const [playerPos, setPlayerPos] = useState({ x: 150, y: 300 });
+function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos }) {
+  const [playerPos, setPlayerPos] = useState(initialPos || { x: 150, y: 300 });
   const [facing, setFacing] = useState('right');
   const [isMoving, setIsMoving] = useState(false);
   const keysRef = useRef(new Set());
@@ -73,7 +73,8 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
     };
   }, [playerPos, onAttack]);
 
-  // Movement loop
+  // Movement loop + send position to server
+  const lastSent = useRef(0);
   useEffect(() => {
     const gameLoop = () => {
       const keys = keysRef.current;
@@ -86,6 +87,12 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
         if (keys.has('s')) { y += SPEED; moving = true; }
         x = Math.max(0, Math.min(ARENA_W - PLAYER_SIZE, x));
         y = Math.max(0, Math.min(ARENA_H - PLAYER_SIZE, y));
+        // Send position to server (throttled)
+        const now = Date.now();
+        if (moving && now - lastSent.current > 80) {
+          socket.emit('player_move', { x, y });
+          lastSent.current = now;
+        }
         return { x, y };
       });
       setIsMoving(moving);
@@ -164,6 +171,31 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
             </div>
           </div>
         </div>
+
+        {/* OTHER PLAYERS (Guild mode) */}
+        {Object.values(otherPlayersMap).map(op => (
+          <div key={op.name} style={{
+            position: 'absolute', left: op.x, top: op.y,
+            width: 70, height: 70, zIndex: 3,
+            transition: 'left 0.1s linear, top 0.1s linear',
+          }}>
+            <img src={PLAYER_IMG} alt={op.name} style={{
+              width: '100%', height: '100%', objectFit: 'contain',
+              filter: 'drop-shadow(0 0 6px rgba(6,214,160,0.7)) hue-rotate(120deg)',
+            }} />
+            <div style={{
+              position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.7)', padding: '1px 6px', borderRadius: '3px',
+              fontSize: '0.6rem', whiteSpace: 'nowrap', color: '#06d6a0',
+              border: '1px solid rgba(6,214,160,0.4)',
+            }}>{op.name}</div>
+            <div style={{ position: 'absolute', bottom: -8, left: '10%', width: '80%' }}>
+              <div style={{ background: 'rgba(0,0,0,0.7)', borderRadius: '3px', height: '4px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', background: '#06d6a0', width: `${(op.hp/op.hpMax)*100}%` }}></div>
+              </div>
+            </div>
+          </div>
+        ))}
 
         {/* Attack range indicator */}
         {inRange && bossHp > 0 && (
@@ -268,6 +300,8 @@ export default function App() {
   const [playersInZone, setPlayersInZone] = useState([]);
   const [combatLogs, setCombatLogs] = useState([]);
   const [isAttacking, setIsAttacking] = useState(false);
+  const [otherPlayers, setOtherPlayers] = useState({}); // name -> { name, x, y, class, level, hp, hpMax }
+  const [initialPos, setInitialPos] = useState({ x: 150, y: 300 });
 
   const addLog = useCallback((text, type = 'system') => {
     setCombatLogs(prev => [{ id: Date.now() + Math.random(), text, type }, ...prev].slice(0, 50));
@@ -282,11 +316,29 @@ export default function App() {
       setActiveZone(data.zone); setBossHp(data.bossHp); setBossHpMax(data.zone.boss.hpMax);
       setBossStatus(data.bossStatus); setPlayersInZone(data.playersInZone);
       setCharacter(prev => prev ? { ...prev, hp: data.player.hp, hpMax: data.player.hpMax } : prev);
+      setInitialPos({ x: data.player.x || 150, y: data.player.y || 300 });
+      // Load other players already in zone
+      const others = {};
+      if (data.otherPlayers) {
+        data.otherPlayers.forEach(p => { others[p.name] = p; });
+      }
+      setOtherPlayers(others);
       setCombatLogs([{ id: Date.now(), text: `Bạn đã tiến vào ${data.zone.name}`, type: 'system' }]);
       setView('combat');
     });
-    socket.on('player_joined_zone', (data) => { setPlayersInZone(data.playersInZone); addLog(`⚔️ ${data.name} đã tham gia!`, 'guild'); });
-    socket.on('player_left_zone', (data) => { setPlayersInZone(data.playersInZone); addLog(`👋 ${data.name} đã rời.`, 'system'); });
+    socket.on('player_joined_zone', (data) => {
+      setPlayersInZone(data.playersInZone);
+      setOtherPlayers(prev => ({ ...prev, [data.name]: { name: data.name, class: data.class, level: data.level, x: data.x, y: data.y, hp: data.hp || 48000, hpMax: data.hpMax || 48000 } }));
+      addLog(`⚔️ ${data.name} đã tham gia!`, 'guild');
+    });
+    socket.on('player_left_zone', (data) => {
+      setPlayersInZone(data.playersInZone || []);
+      setOtherPlayers(prev => { const n = {...prev}; delete n[data.name]; return n; });
+      addLog(`👋 ${data.name} đã rời.`, 'system');
+    });
+    socket.on('player_moved', (data) => {
+      setOtherPlayers(prev => prev[data.name] ? { ...prev, [data.name]: { ...prev[data.name], x: data.x, y: data.y } } : prev);
+    });
     socket.on('attack_result', (data) => {
       setBossHp(data.bossHp); setBossStatus(data.bossStatus);
       const isMe = data.attackerName === character?.name;
@@ -303,7 +355,7 @@ export default function App() {
   }, [character?.name, addLog]);
 
   const enterZone = (zoneId) => socket.emit('enter_zone', zoneId);
-  const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); };
+  const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); setOtherPlayers({}); };
   const handleAttack = useCallback(() => {
     if (!activeZone || bossHp <= 0 || isAttacking) return;
     setIsAttacking(true);
@@ -387,6 +439,7 @@ export default function App() {
             activeZone={activeZone} bossHp={bossHp} bossHpMax={bossHpMax} bossStatus={bossStatus}
             character={character} onAttack={handleAttack} isAttacking={isAttacking}
             playersInZone={playersInZone} combatLogs={combatLogs}
+            otherPlayersMap={otherPlayers} initialPos={initialPos}
           />
         </div>
       )}
