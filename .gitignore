@@ -4,8 +4,6 @@ node_modules/
 # Environment
 .env
 
-# Build output (will be built on server)
-game-ui/dist/
 
 # OS files
 .DS_Store
