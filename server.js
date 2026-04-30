@@ -41,6 +41,68 @@ const ZONES = {
   }
 };
 
+// ====== LOOT TABLES ======
+const RARITY = { common: '⬜ Common', rare: '🟦 Rare', epic: '🟪 Epic', legendary: '🟧 Legendary' };
+const RARITY_COLORS = { common: '#adb5bd', rare: '#4895ef', epic: '#9d4edd', legendary: '#ff9f1c' };
+
+const LOOT_TABLES = {
+  forest: [
+    { name: 'Lá Cây Hắc Ám', rarity: 'common', icon: '🍃', type: 'Nguyên liệu' },
+    { name: 'Nhựa Treant Cổ Đại', rarity: 'rare', icon: '🧪', type: 'Nguyên liệu' },
+    { name: 'Rìu Rễ Cây Ma', rarity: 'rare', icon: '🪓', type: 'Vũ khí' },
+    { name: 'Giáp Vỏ Cây Thiêng', rarity: 'epic', icon: '🛡️', type: 'Giáp' },
+    { name: 'Hạt Giống Thế Giới', rarity: 'legendary', icon: '🌟', type: 'Huyền thoại' },
+  ],
+  volcano: [
+    { name: 'Mảnh Obsidian', rarity: 'common', icon: '�ite', type: 'Nguyên liệu' },
+    { name: 'Lông Phượng Hoàng Lửa', rarity: 'rare', icon: '🪶', type: 'Nguyên liệu' },
+    { name: 'Kiếm Nham Thạch', rarity: 'rare', icon: '⚔️', type: 'Vũ khí' },
+    { name: 'Áo Choàng Ngọn Lửa', rarity: 'epic', icon: '🧥', type: 'Giáp' },
+    { name: 'Vương Miện Kael\'thas', rarity: 'epic', icon: '👑', type: 'Phụ kiện' },
+    { name: 'Cánh Phượng Hoàng Bất Diệt', rarity: 'legendary', icon: '🔥', type: 'Huyền thoại' },
+  ],
+  ocean: [
+    { name: 'Vảy Kraken', rarity: 'common', icon: '🐚', type: 'Nguyên liệu' },
+    { name: 'Ngọc Trai Vực Thẳm', rarity: 'rare', icon: '💎', type: 'Nguyên liệu' },
+    { name: 'Đinh Ba Thủy Triều', rarity: 'rare', icon: '🔱', type: 'Vũ khí' },
+    { name: 'Giáp Biển Sâu', rarity: 'epic', icon: '🛡️', type: 'Giáp' },
+    { name: 'Mắt Kraken', rarity: 'epic', icon: '👁️', type: 'Phụ kiện' },
+    { name: 'Trident Chúa Tể Đại Dương', rarity: 'legendary', icon: '🌊', type: 'Huyền thoại' },
+  ],
+  tower: [
+    { name: 'Bụi Ma Thuật', rarity: 'common', icon: '✨', type: 'Nguyên liệu' },
+    { name: 'Sách Phép Cổ', rarity: 'rare', icon: '📕', type: 'Nguyên liệu' },
+    { name: 'Gậy Linh Hồn', rarity: 'rare', icon: '🪄', type: 'Vũ khí' },
+    { name: 'Áo Bào Lich Vương', rarity: 'epic', icon: '🧙', type: 'Giáp' },
+    { name: 'Phylactery Vĩnh Cửu', rarity: 'legendary', icon: '💀', type: 'Huyền thoại' },
+  ]
+};
+
+function generateLoot(zoneId) {
+  const table = LOOT_TABLES[zoneId] || [];
+  const drops = [];
+  const numDrops = randomInt(2, 4);
+  const gold = randomInt(5000, 50000);
+  
+  for (let i = 0; i < numDrops; i++) {
+    // Weighted random by rarity
+    const roll = Math.random();
+    let pool;
+    if (roll < 0.05) pool = table.filter(i => i.rarity === 'legendary');
+    else if (roll < 0.25) pool = table.filter(i => i.rarity === 'epic');
+    else if (roll < 0.55) pool = table.filter(i => i.rarity === 'rare');
+    else pool = table.filter(i => i.rarity === 'common');
+    
+    if (pool.length === 0) pool = table;
+    const item = pool[randomInt(0, pool.length - 1)];
+    // Avoid duplicates
+    if (!drops.find(d => d.name === item.name)) {
+      drops.push({ ...item, id: Date.now() + '_' + i, rarityLabel: RARITY[item.rarity], color: RARITY_COLORS[item.rarity] });
+    }
+  }
+  return { items: drops, gold };
+}
+
 // Active players map: socketId -> playerData
 const players = new Map();
 
@@ -225,10 +287,12 @@ io.on('connection', (socket) => {
       // Broadcast to entire zone
       io.to(`zone:${zoneId}`).emit('attack_result', attackResult);
       if (bossState.hp <= 0) {
+        const loot = generateLoot(zoneId);
         io.to(`zone:${zoneId}`).emit('boss_killed', {
           killerName: player.name,
           bossName: zone.boss.name,
-          zoneId
+          zoneId,
+          loot
         });
         // Respawn boss after 15 seconds
         setTimeout(() => {
@@ -244,7 +308,8 @@ io.on('connection', (socket) => {
       // Solo: only send to this player
       socket.emit('attack_result', attackResult);
       if (bossState.hp <= 0) {
-        socket.emit('boss_killed', { killerName: player.name, bossName: zone.boss.name, zoneId });
+        const loot = generateLoot(zoneId);
+        socket.emit('boss_killed', { killerName: player.name, bossName: zone.boss.name, zoneId, loot });
       }
     }
 

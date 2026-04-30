@@ -25,7 +25,7 @@ const ZONE_POSITIONS = {
 };
 
 // ====== GAME ARENA COMPONENT ======
-function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos, isDead, deathTimer }) {
+function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos, isDead, deathTimer, lootDrop, showLoot, onCloseLoot }) {
   const [playerPos, setPlayerPos] = useState(initialPos || { x: 150, y: 300 });
   const [facing, setFacing] = useState('right');
   const [isMoving, setIsMoving] = useState(false);
@@ -223,6 +223,64 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
           </div>
         )}
 
+        {/* LOOT DROP OVERLAY */}
+        {showLoot && lootDrop && !isDead && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 9,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              background: 'rgba(15,10,25,0.95)', border: '2px solid #ffd166',
+              borderRadius: '16px', padding: '25px', maxWidth: '500px', width: '90%',
+              boxShadow: '0 0 40px rgba(255,209,102,0.3)',
+              animation: 'slideIn 0.5s ease-out',
+            }}>
+              <h3 style={{ textAlign: 'center', fontFamily: "'Cinzel', serif", color: '#ffd166', marginBottom: '15px', fontSize: '1.3rem', letterSpacing: '2px' }}>
+                🎁 VẬT PHẨM RƠI
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
+                {lootDrop.items.map((item, i) => (
+                  <div key={item.id || i} style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    background: 'rgba(255,255,255,0.05)', borderRadius: '10px',
+                    padding: '10px 14px', border: `1px solid ${item.color}40`,
+                    animation: `slideIn 0.3s ease-out ${i * 0.15}s both`,
+                  }}>
+                    <span style={{ fontSize: '1.8rem' }}>{item.icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 'bold', color: item.color, fontSize: '0.95rem' }}>{item.name}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', gap: '8px' }}>
+                        <span style={{ color: item.color }}>{item.rarityLabel}</span>
+                        <span>·</span>
+                        <span>{item.type}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{
+                textAlign: 'center', background: 'rgba(255,209,102,0.1)',
+                padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,209,102,0.3)',
+                marginBottom: '15px',
+              }}>
+                <span style={{ color: '#ffd166', fontWeight: 'bold', fontSize: '1.1rem' }}>
+                  💰 +{lootDrop.gold.toLocaleString()} Vàng
+                </span>
+              </div>
+              <button onClick={onCloseLoot} style={{
+                width: '100%', padding: '10px', borderRadius: '8px',
+                background: 'linear-gradient(45deg, #ffd166, #ff9f1c)', border: 'none',
+                color: '#0b0914', fontWeight: 'bold', fontSize: '0.9rem',
+                cursor: 'pointer', fontFamily: "'Cinzel', serif", letterSpacing: '1px',
+              }}>
+                NHẬN TẤT CẢ
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Attack range indicator */}
         {inRange && bossHp > 0 && !isDead && (
           <div style={{
@@ -330,6 +388,8 @@ export default function App() {
   const [initialPos, setInitialPos] = useState({ x: 150, y: 300 });
   const [isDead, setIsDead] = useState(false);
   const [deathTimer, setDeathTimer] = useState(0);
+  const [lootDrop, setLootDrop] = useState(null); // { items: [], gold: 0 }
+  const [showLoot, setShowLoot] = useState(false);
 
   const addLog = useCallback((text, type = 'system') => {
     setCombatLogs(prev => [{ id: Date.now() + Math.random(), text, type }, ...prev].slice(0, 50));
@@ -377,7 +437,20 @@ export default function App() {
       addLog(`[${data.bossName}] Tấn công gây ${data.damage.toLocaleString()} sát thương!`, 'boss');
     });
     socket.on('boss_zone_attack', () => {});
-    socket.on('boss_killed', (data) => { setBossStatus('Đã bị tiêu diệt'); setBossHp(0); addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}!`, 'system'); });
+    socket.on('boss_killed', (data) => {
+      setBossStatus('Đã bị tiêu diệt'); setBossHp(0);
+      addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}!`, 'system');
+      if (data.loot) {
+        setLootDrop(data.loot);
+        setShowLoot(true);
+        data.loot.items.forEach(item => {
+          addLog(`🎁 Vật phẩm rơi: ${item.icon} ${item.name} (${item.rarityLabel})`, 'guild');
+        });
+        addLog(`💰 Nhận được ${data.loot.gold.toLocaleString()} vàng!`, 'player');
+        // Auto close loot after 10 seconds
+        setTimeout(() => setShowLoot(false), 10000);
+      }
+    });
     socket.on('boss_respawned', (data) => { setBossHp(data.bossHp); setBossStatus('Đang hoạt động'); addLog(`🔥 ${data.bossName} đã hồi sinh!`, 'boss'); });
 
     // HP sync for other players
@@ -413,7 +486,7 @@ export default function App() {
   }, [character?.name, addLog]);
 
   const enterZone = (zoneId) => socket.emit('enter_zone', zoneId);
-  const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); setOtherPlayers({}); };
+  const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); setOtherPlayers({}); setShowLoot(false); setLootDrop(null); };
   const handleAttack = useCallback(() => {
     if (!activeZone || bossHp <= 0 || isAttacking || isDead) return;
     setIsAttacking(true);
@@ -499,6 +572,7 @@ export default function App() {
             playersInZone={playersInZone} combatLogs={combatLogs}
             otherPlayersMap={otherPlayers} initialPos={initialPos}
             isDead={isDead} deathTimer={deathTimer}
+            lootDrop={lootDrop} showLoot={showLoot} onCloseLoot={() => setShowLoot(false)}
           />
         </div>
       )}
