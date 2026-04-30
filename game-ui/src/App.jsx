@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { Shield, Sword, Skull, Crown, Activity, ArrowLeft, Users, User, Home, Wifi, WifiOff, Globe } from 'lucide-react';
+import { Shield, Sword, Skull, Activity, ArrowLeft, Users, User, Home, Wifi, WifiOff, Globe } from 'lucide-react';
 
-// Connect to the backend server
 const SOCKET_URL = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
   : window.location.origin;
-
 const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
 
-// Zone icon mapping
-const ZONE_CONFIG = {
-  forest: { icon: <User size={32} />, color: '#2d6a4f' },
-  volcano: { icon: <Users size={32} />, color: '#ef476f' },
-  ocean:   { icon: <Users size={32} />, color: '#0077b6' },
-  tower:   { icon: <User size={32} />, color: '#9d4edd' },
+// Asset mapping
+const ZONE_ASSETS = {
+  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/boss_treant.png',   color: '#2d6a4f' },
+  volcano: { bg: '/assets/zone_volcano.png',  boss: '/assets/boss_kaelthas.png', color: '#ef476f' },
+  ocean:   { bg: '/assets/zone_ocean.png',    boss: '/assets/boss_kraken.png',   color: '#0077b6' },
+  tower:   { bg: '/assets/zone_tower.png',    boss: '/assets/boss_lich.png',     color: '#9d4edd' },
 };
+
+const PLAYER_IMG = '/assets/player.png';
 
 const ZONE_POSITIONS = {
   forest:  { top: '25%', left: '55%' },
@@ -24,124 +24,300 @@ const ZONE_POSITIONS = {
   tower:   { top: '25%', left: '25%' },
 };
 
+// ====== GAME ARENA COMPONENT ======
+function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs }) {
+  const [playerPos, setPlayerPos] = useState({ x: 150, y: 300 });
+  const [facing, setFacing] = useState('right');
+  const [isMoving, setIsMoving] = useState(false);
+  const keysRef = useRef(new Set());
+  const arenaRef = useRef(null);
+  const animFrame = useRef(null);
+
+  const SPEED = 4;
+  const ARENA_W = 900;
+  const ARENA_H = 500;
+  const PLAYER_SIZE = 80;
+  const BOSS_X = 650;
+  const BOSS_Y = 120;
+  const BOSS_SIZE = 220;
+  const ATTACK_RANGE = 180;
+
+  const assets = ZONE_ASSETS[activeZone.id] || ZONE_ASSETS.forest;
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const key = e.key.toLowerCase();
+      if (['w','a','s','d'].includes(key)) {
+        e.preventDefault();
+        keysRef.current.add(key);
+      }
+      // Space bar attack
+      if (e.code === 'Space') {
+        e.preventDefault();
+        const dx = (BOSS_X + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
+        const dy = (BOSS_Y + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < ATTACK_RANGE + BOSS_SIZE/2) {
+          onAttack();
+        }
+      }
+    };
+    const handleKeyUp = (e) => {
+      keysRef.current.delete(e.key.toLowerCase());
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [playerPos, onAttack]);
+
+  // Movement loop
+  useEffect(() => {
+    const gameLoop = () => {
+      const keys = keysRef.current;
+      let moving = false;
+      setPlayerPos(prev => {
+        let { x, y } = prev;
+        if (keys.has('a')) { x -= SPEED; setFacing('left'); moving = true; }
+        if (keys.has('d')) { x += SPEED; setFacing('right'); moving = true; }
+        if (keys.has('w')) { y -= SPEED; moving = true; }
+        if (keys.has('s')) { y += SPEED; moving = true; }
+        x = Math.max(0, Math.min(ARENA_W - PLAYER_SIZE, x));
+        y = Math.max(0, Math.min(ARENA_H - PLAYER_SIZE, y));
+        return { x, y };
+      });
+      setIsMoving(moving);
+      animFrame.current = requestAnimationFrame(gameLoop);
+    };
+    animFrame.current = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(animFrame.current);
+  }, []);
+
+  // Distance check for attack button
+  const dx = (BOSS_X + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
+  const dy = (BOSS_Y + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
+  const distToBoss = Math.sqrt(dx*dx + dy*dy);
+  const inRange = distToBoss < ATTACK_RANGE + BOSS_SIZE/2;
+
+  return (
+    <div style={{ display: 'flex', gap: '15px', flexDirection: 'column' }}>
+      {/* Game Arena */}
+      <div ref={arenaRef} style={{
+        width: '100%', maxWidth: ARENA_W, height: ARENA_H,
+        backgroundImage: `url(${assets.bg})`,
+        backgroundSize: 'cover', backgroundPosition: 'center',
+        borderRadius: '16px', border: `2px solid ${assets.color}`,
+        position: 'relative', overflow: 'hidden',
+        boxShadow: `0 0 30px ${assets.color}40`,
+        margin: '0 auto',
+      }}>
+        {/* Dark overlay for readability */}
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1 }}></div>
+
+        {/* Boss */}
+        <div style={{
+          position: 'absolute', left: BOSS_X, top: BOSS_Y,
+          width: BOSS_SIZE, height: BOSS_SIZE, zIndex: 2,
+          transition: 'filter 0.2s',
+          filter: bossHp <= 0 ? 'grayscale(1) brightness(0.3)' : 'none',
+          animation: bossHp > 0 ? 'bossIdle 2s ease-in-out infinite' : 'none',
+        }}>
+          <img src={assets.boss} alt="Boss" style={{
+            width: '100%', height: '100%', objectFit: 'contain',
+            filter: 'drop-shadow(0 0 15px rgba(255,0,0,0.6))',
+          }} />
+          {/* Boss HP bar above boss */}
+          {bossHp > 0 && (
+            <div style={{ position: 'absolute', top: -25, left: '50%', transform: 'translateX(-50%)', width: '80%' }}>
+              <div style={{ background: 'rgba(0,0,0,0.7)', borderRadius: '4px', height: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.2)' }}>
+                <div style={{ height: '100%', background: 'linear-gradient(90deg, #d00000, #ef476f)', width: `${(bossHp/bossHpMax)*100}%`, transition: 'width 0.3s' }}></div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Player character */}
+        <div style={{
+          position: 'absolute', left: playerPos.x, top: playerPos.y,
+          width: PLAYER_SIZE, height: PLAYER_SIZE, zIndex: 3,
+          transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)',
+          transition: 'transform 0.1s',
+          animation: isMoving ? 'playerBob 0.3s ease-in-out infinite' : 'none',
+        }}>
+          <img src={PLAYER_IMG} alt="Player" style={{
+            width: '100%', height: '100%', objectFit: 'contain',
+            filter: 'drop-shadow(0 0 8px rgba(157,78,221,0.8))',
+          }} />
+          {/* Player name tag */}
+          <div style={{
+            position: 'absolute', top: -20, left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(0,0,0,0.7)', padding: '2px 8px', borderRadius: '4px',
+            fontSize: '0.7rem', whiteSpace: 'nowrap', color: '#e0aaff',
+            border: '1px solid rgba(157,78,221,0.5)',
+          }}>{character.name}</div>
+          {/* Player HP bar */}
+          <div style={{ position: 'absolute', bottom: -10, left: '10%', width: '80%' }}>
+            <div style={{ background: 'rgba(0,0,0,0.7)', borderRadius: '3px', height: '5px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', background: '#06d6a0', width: `${(character.hp/character.hpMax)*100}%`, transition: 'width 0.3s' }}></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Attack range indicator */}
+        {inRange && bossHp > 0 && (
+          <div style={{
+            position: 'absolute', left: playerPos.x + PLAYER_SIZE/2 - 5, top: playerPos.y - 30,
+            zIndex: 4, color: '#ffd166', fontSize: '0.75rem', fontWeight: 'bold',
+            animation: 'pulse 1s infinite', whiteSpace: 'nowrap',
+          }}>⚔️ Nhấn SPACE để tấn công!</div>
+        )}
+
+        {/* Controls hint */}
+        <div style={{
+          position: 'absolute', bottom: 10, left: 10, zIndex: 4,
+          background: 'rgba(0,0,0,0.7)', padding: '8px 12px', borderRadius: '8px',
+          fontSize: '0.75rem', color: 'var(--text-muted)',
+        }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 28px)', gap: '3px', textAlign: 'center' }}>
+            <div></div>
+            <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: '4px', padding: '2px' }}>W</div>
+            <div></div>
+            <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: '4px', padding: '2px' }}>A</div>
+            <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: '4px', padding: '2px' }}>S</div>
+            <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: '4px', padding: '2px' }}>D</div>
+          </div>
+          <div style={{ marginTop: '4px', textAlign: 'center', fontSize: '0.65rem' }}>Di chuyển</div>
+        </div>
+
+        {/* Zone name overlay */}
+        <div style={{
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 4,
+          background: 'rgba(0,0,0,0.7)', padding: '6px 20px', borderRadius: '20px',
+          fontFamily: "'Cinzel', serif", color: assets.color, letterSpacing: '2px',
+          border: `1px solid ${assets.color}50`,
+        }}>{activeZone.name}</div>
+
+        {/* Online badge */}
+        <div style={{
+          position: 'absolute', top: 10, right: 10, zIndex: 4,
+          background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: '12px',
+          fontSize: '0.75rem',
+          color: activeZone.type === 'guild' ? '#06d6a0' : '#9d4edd',
+        }}>
+          {activeZone.type === 'guild' ? `🌐 ${playersInZone.length} online` : '🔒 Solo'}
+        </div>
+      </div>
+
+      {/* Bottom UI panels */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', maxWidth: ARENA_W, margin: '0 auto', width: '100%' }}>
+
+        {/* Boss info + Attack */}
+        <div className="glass-panel" style={{ padding: '15px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+            <img src={assets.boss} alt="" style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: '8px' }} />
+            <div>
+              <h3 style={{ fontSize: '1rem', color: assets.color }}>{activeZone.boss.name}</h3>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Lv {activeZone.boss.level} | {activeZone.boss.difficulty}</p>
+            </div>
+          </div>
+          <div style={{ marginBottom: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
+              <span style={{ color: '#ef476f' }}>HP</span>
+              <span>{bossHp.toLocaleString()} / {bossHpMax.toLocaleString()}</span>
+            </div>
+            <div className="progress-container" style={{ height: '10px' }}>
+              <div className="progress-bar progress-hp" style={{ width: `${(bossHp/bossHpMax)*100}%` }}></div>
+            </div>
+          </div>
+          <button className="btn-action" onClick={onAttack} disabled={bossHp <= 0 || isAttacking || !inRange}
+            style={{ opacity: (bossHp <= 0 || isAttacking || !inRange) ? 0.4 : 1, padding: '10px', fontSize: '0.85rem', background: assets.color }}>
+            <Sword size={16} />
+            {bossHp <= 0 ? 'BOSS ĐÃ BỊ TIÊU DIỆT' : !inRange ? 'Lại gần Boss để tấn công...' : 'TẤN CÔNG (SPACE)'}
+          </button>
+        </div>
+
+        {/* Combat Log */}
+        <div className="glass-panel" style={{ padding: '15px' }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: '0.9rem' }}>
+            <Activity size={16} color="var(--accent)" /> Combat Log
+          </h3>
+          <div className="combat-log" style={{ height: '140px' }}>
+            {combatLogs.map(log => (
+              <div key={log.id} className={`log-entry log-${log.type}`}>{log.text}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====== MAIN APP ======
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [view, setView] = useState('map');
-
   const [character, setCharacter] = useState(null);
   const [zones, setZones] = useState([]);
-
   const [activeZone, setActiveZone] = useState(null);
   const [bossHp, setBossHp] = useState(0);
   const [bossHpMax, setBossHpMax] = useState(1);
   const [bossStatus, setBossStatus] = useState('');
   const [playersInZone, setPlayersInZone] = useState([]);
-
   const [combatLogs, setCombatLogs] = useState([]);
   const [isAttacking, setIsAttacking] = useState(false);
-
-  const logRef = useRef(null);
 
   const addLog = useCallback((text, type = 'system') => {
     setCombatLogs(prev => [{ id: Date.now() + Math.random(), text, type }, ...prev].slice(0, 50));
   }, []);
 
-  // ---- Socket event handlers ----
   useEffect(() => {
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-
-    socket.on('init', (data) => {
-      setCharacter(data.player);
-      setZones(data.zones);
-      setOnlineCount(data.onlineCount);
-    });
-
+    socket.on('init', (data) => { setCharacter(data.player); setZones(data.zones); setOnlineCount(data.onlineCount); });
     socket.on('online_count', (count) => setOnlineCount(count));
-
     socket.on('zone_entered', (data) => {
-      setActiveZone(data.zone);
-      setBossHp(data.bossHp);
-      setBossHpMax(data.zone.boss.hpMax);
-      setBossStatus(data.bossStatus);
-      setPlayersInZone(data.playersInZone);
+      setActiveZone(data.zone); setBossHp(data.bossHp); setBossHpMax(data.zone.boss.hpMax);
+      setBossStatus(data.bossStatus); setPlayersInZone(data.playersInZone);
       setCharacter(prev => prev ? { ...prev, hp: data.player.hp, hpMax: data.player.hpMax } : prev);
       setCombatLogs([{ id: Date.now(), text: `Bạn đã tiến vào ${data.zone.name}`, type: 'system' }]);
       setView('combat');
     });
-
-    socket.on('player_joined_zone', (data) => {
-      setPlayersInZone(data.playersInZone);
-      addLog(`⚔️ ${data.name} đã tham gia khu vực!`, 'guild');
-    });
-
-    socket.on('player_left_zone', (data) => {
-      setPlayersInZone(data.playersInZone);
-      addLog(`👋 ${data.name} đã rời khu vực.`, 'system');
-    });
-
+    socket.on('player_joined_zone', (data) => { setPlayersInZone(data.playersInZone); addLog(`⚔️ ${data.name} đã tham gia!`, 'guild'); });
+    socket.on('player_left_zone', (data) => { setPlayersInZone(data.playersInZone); addLog(`👋 ${data.name} đã rời.`, 'system'); });
     socket.on('attack_result', (data) => {
-      setBossHp(data.bossHp);
-      setBossStatus(data.bossStatus);
+      setBossHp(data.bossHp); setBossStatus(data.bossStatus);
       const isMe = data.attackerName === character?.name;
-      const type = isMe ? 'player' : 'guild';
-      const prefix = isMe ? '[Bạn]' : `[${data.attackerName}]`;
-      addLog(`${prefix} Gây ${data.damage.toLocaleString()} sát thương ${data.isCrit ? '(Chí mạng! 💥)' : ''}`, type);
+      addLog(`${isMe ? '[Bạn]' : `[${data.attackerName}]`} Gây ${data.damage.toLocaleString()} sát thương ${data.isCrit ? '(Chí mạng! 💥)' : ''}`, isMe ? 'player' : 'guild');
     });
-
     socket.on('boss_attacks_you', (data) => {
       setCharacter(prev => prev ? { ...prev, hp: data.playerHp } : prev);
-      addLog(`[${data.bossName}] Tấn công bạn gây ${data.damage.toLocaleString()} sát thương!`, 'boss');
+      addLog(`[${data.bossName}] Tấn công gây ${data.damage.toLocaleString()} sát thương!`, 'boss');
     });
-
-    socket.on('boss_zone_attack', (data) => {
-      // Already handled by boss_attacks_you for damage, this is just visual
-    });
-
-    socket.on('boss_killed', (data) => {
-      setBossStatus('Đã bị tiêu diệt');
-      setBossHp(0);
-      addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}! Boss sẽ hồi sinh sau 15 giây...`, 'system');
-    });
-
-    socket.on('boss_respawned', (data) => {
-      setBossHp(data.bossHp);
-      setBossStatus('Đang hoạt động');
-      addLog(`🔥 ${data.bossName} đã hồi sinh! Sẵn sàng chiến đấu!`, 'boss');
-    });
-
+    socket.on('boss_zone_attack', () => {});
+    socket.on('boss_killed', (data) => { setBossStatus('Đã bị tiêu diệt'); setBossHp(0); addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}!`, 'system'); });
+    socket.on('boss_respawned', (data) => { setBossHp(data.bossHp); setBossStatus('Đang hoạt động'); addLog(`🔥 ${data.bossName} đã hồi sinh!`, 'boss'); });
     return () => { socket.removeAllListeners(); };
   }, [character?.name, addLog]);
 
-  const enterZone = (zoneId) => {
-    socket.emit('enter_zone', zoneId);
-  };
-
-  const exitZone = () => {
-    socket.emit('leave_zone');
-    setView('map');
-    setActiveZone(null);
-    setCombatLogs([]);
-  };
-
-  const handleAttack = () => {
+  const enterZone = (zoneId) => socket.emit('enter_zone', zoneId);
+  const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); };
+  const handleAttack = useCallback(() => {
     if (!activeZone || bossHp <= 0 || isAttacking) return;
     setIsAttacking(true);
     socket.emit('attack');
-    setTimeout(() => setIsAttacking(false), 600);
-  };
+    setTimeout(() => setIsAttacking(false), 500);
+  }, [activeZone, bossHp, isAttacking]);
 
+  // Loading screen
   if (!character) {
     return (
       <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
         <div className="glass-panel" style={{ textAlign: 'center', padding: '60px' }}>
-          <h1 className="title-font" style={{ background: 'linear-gradient(to right, #e0aaff, #9d4edd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '20px' }}>
-            AetherWorld
-          </h1>
-          <p style={{ color: 'var(--text-muted)' }}>
-            {connected ? 'Đang tải thế giới...' : 'Đang kết nối tới máy chủ...'}
-          </p>
+          <h1 className="title-font" style={{ background: 'linear-gradient(to right, #e0aaff, #9d4edd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '20px' }}>AetherWorld</h1>
+          <p style={{ color: 'var(--text-muted)' }}>{connected ? 'Đang tải thế giới...' : 'Đang kết nối tới máy chủ...'}</p>
           <div style={{ marginTop: '20px', width: '40px', height: '40px', border: '3px solid var(--primary)', borderTop: '3px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '20px auto' }}></div>
         </div>
       </div>
@@ -150,7 +326,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* HEADER */}
       <header className="header">
         <div>
           <h1>AetherWorld</h1>
@@ -158,52 +333,41 @@ export default function App() {
             {connected ? <Wifi size={14} color="var(--success)" /> : <WifiOff size={14} color="var(--danger)" />}
             {connected ? 'Đã kết nối' : 'Mất kết nối'}
             <span style={{ margin: '0 8px', color: 'rgba(255,255,255,0.2)' }}>|</span>
-            <Globe size={14} /> {onlineCount} người chơi đang online
+            <Globe size={14} /> {onlineCount} người chơi online
           </p>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--secondary)' }}>
-            <Shield size={20} /> {character.name}
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            {character.race} {character.class} · Lv {character.level} · CR {character.combatRating.toLocaleString()}
-          </p>
+        <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <img src={PLAYER_IMG} alt="" style={{ width: 36, height: 36, objectFit: 'contain', filter: 'drop-shadow(0 0 5px rgba(157,78,221,0.6))' }} />
+          <div>
+            <h3 style={{ color: 'var(--secondary)', fontSize: '1rem' }}>{character.name}</h3>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{character.race} {character.class} · Lv {character.level}</p>
+          </div>
         </div>
       </header>
 
-      {/* ===== MAP VIEW ===== */}
+      {/* MAP VIEW */}
       {view === 'map' && (
         <>
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Chọn một khu vực để vào chiến đấu. Chia sẻ đường link cho bạn bè để chơi cùng!</p>
+            <p style={{ color: 'var(--text-muted)' }}>Chọn khu vực để vào chiến đấu · Chia sẻ link cho bạn bè chơi cùng!</p>
           </div>
           <div className="map-container" style={{ minHeight: '550px' }}>
             <div className="map-grid"></div>
-
-            {/* Safe zone */}
-            <div className="zone-node" style={{ top: '48%', left: '50%' }} onClick={() => alert('Đây là khu vực an toàn!')}>
-              <div className="zone-icon-wrapper" style={{ borderColor: '#06d6a0', color: '#06d6a0' }}>
-                <Home size={32} color="#06d6a0" />
-              </div>
-              <div className="zone-label" style={{ color: '#06d6a0' }}>
-                Thành Cổ Aether
-                <div className="zone-type-badge" style={{ background: 'rgba(6,214,160,0.2)' }}>Safe Zone</div>
-              </div>
+            <div className="zone-node" style={{ top: '48%', left: '50%' }} onClick={() => alert('Khu vực an toàn!')}>
+              <div className="zone-icon-wrapper" style={{ borderColor: '#06d6a0', color: '#06d6a0' }}><Home size={32} color="#06d6a0" /></div>
+              <div className="zone-label" style={{ color: '#06d6a0' }}>Thành Cổ Aether<div className="zone-type-badge" style={{ background: 'rgba(6,214,160,0.2)' }}>Safe Zone</div></div>
             </div>
-
-            {/* Dynamic zones from server */}
             {zones.map(zone => {
-              const cfg = ZONE_CONFIG[zone.id] || { icon: <Skull size={32} />, color: '#ff006e' };
-              const pos = ZONE_POSITIONS[zone.id] || { top: '50%', left: '50%' };
+              const a = ZONE_ASSETS[zone.id]; const pos = ZONE_POSITIONS[zone.id] || { top: '50%', left: '50%' };
               return (
                 <div key={zone.id} className="zone-node" style={{ top: pos.top, left: pos.left }} onClick={() => enterZone(zone.id)}>
-                  <div className="zone-icon-wrapper" style={{ borderColor: cfg.color, color: cfg.color }}>
-                    {React.cloneElement(cfg.icon, { color: cfg.color })}
+                  <div className="zone-icon-wrapper" style={{ borderColor: a?.color || '#fff', overflow: 'hidden' }}>
+                    <img src={a?.boss} alt="" style={{ width: '90%', height: '90%', objectFit: 'contain' }} />
                   </div>
-                  <div className="zone-label" style={{ color: cfg.color }}>
+                  <div className="zone-label" style={{ color: a?.color || '#fff' }}>
                     {zone.name}
-                    <div className="zone-type-badge" style={{ background: `${cfg.color}33` }}>
-                      {zone.type === 'solo' ? '🔒 Offline Solo' : '🌐 Online Guild'}
+                    <div className="zone-type-badge" style={{ background: `${a?.color || '#fff'}33` }}>
+                      {zone.type === 'solo' ? '🔒 Solo' : '🌐 Guild'}
                     </div>
                   </div>
                 </div>
@@ -213,121 +377,17 @@ export default function App() {
         </>
       )}
 
-      {/* ===== COMBAT VIEW ===== */}
+      {/* COMBAT VIEW */}
       {view === 'combat' && activeZone && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <button className="btn-back" onClick={exitZone}>
-              <ArrowLeft size={18} /> Quay lại Bản đồ
-            </button>
-            {activeZone.type === 'guild' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontSize: '0.9rem' }}>
-                <Users size={16} /> {playersInZone.length} người đang trong khu vực
-              </div>
-            )}
-          </div>
-
-          <div className="dashboard-grid">
-
-            {/* Boss Panel */}
-            <div className="glass-panel" style={{ border: `1px solid ${ZONE_CONFIG[activeZone.id]?.color || '#ff006e'}`, gridColumn: 'span 2' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                <h2 className="title-font" style={{ display: 'flex', alignItems: 'center', gap: '10px', color: ZONE_CONFIG[activeZone.id]?.color || '#ff006e' }}>
-                  <Skull /> {activeZone.name}
-                </h2>
-                <span className="badge" style={{
-                  background: activeZone.type === 'guild' ? 'rgba(6,214,160,0.2)' : 'rgba(157,78,221,0.2)',
-                  color: activeZone.type === 'guild' ? 'var(--success)' : 'var(--primary)',
-                  border: `1px solid ${activeZone.type === 'guild' ? 'var(--success)' : 'var(--primary)'}`
-                }}>
-                  {activeZone.type === 'guild' ? '🌐 ONLINE MULTIPLAYER' : '🔒 OFFLINE SOLO'}
-                </span>
-              </div>
-
-              <div style={{ textAlign: 'center', margin: '25px 0' }}>
-                <h3 style={{ fontSize: '1.8rem', color: 'var(--text-main)' }}>{activeZone.boss.name}</h3>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>Lv {activeZone.boss.level} | {activeZone.boss.difficulty}</p>
-
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '8px' }}>
-                    <span style={{ color: ZONE_CONFIG[activeZone.id]?.color, fontWeight: 'bold' }}>HP Boss</span>
-                    <span>{bossHpMax > 0 ? ((bossHp / bossHpMax) * 100).toFixed(1) : 0}%</span>
-                  </div>
-                  <div className="progress-container" style={{ height: '16px' }}>
-                    <div className="progress-bar" style={{
-                      background: ZONE_CONFIG[activeZone.id]?.color || '#ef476f',
-                      width: `${bossHpMax > 0 ? (bossHp / bossHpMax) * 100 : 0}%`
-                    }}></div>
-                  </div>
-                  <p style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    {bossHp.toLocaleString()} / {bossHpMax.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-
-              {/* Players in zone (guild mode) */}
-              {activeZone.type === 'guild' && playersInZone.length > 0 && (
-                <div style={{ marginBottom: '15px', padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px' }}>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px' }}>Đồng đội trong khu vực:</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {playersInZone.map(name => (
-                      <span key={name} style={{
-                        fontSize: '0.75rem', padding: '4px 8px', borderRadius: '4px',
-                        background: name === character.name ? 'rgba(157,78,221,0.3)' : 'rgba(255,255,255,0.08)',
-                        border: name === character.name ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.1)',
-                        color: name === character.name ? 'var(--secondary)' : 'var(--text-muted)'
-                      }}>
-                        {name === character.name ? `${name} (Bạn)` : name}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <button
-                className="btn-action"
-                onClick={handleAttack}
-                disabled={bossHp <= 0 || isAttacking}
-                style={{
-                  opacity: (bossHp <= 0 || isAttacking) ? 0.5 : 1,
-                  background: bossHp <= 0 ? '#333' : (ZONE_CONFIG[activeZone.id]?.color || 'var(--primary)')
-                }}
-              >
-                <Sword size={20} />
-                {bossHp <= 0 ? 'BOSS ĐÃ BỊ TIÊU DIỆT — Đang hồi sinh...' : 'TẤN CÔNG'}
-              </button>
-            </div>
-
-            {/* Right side: Character + Combat Log */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div className="glass-panel" style={{ padding: '15px' }}>
-                <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px', marginBottom: '10px', fontSize: '1rem' }}>
-                  {character.name}
-                </h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '5px' }}>
-                  <span style={{ color: '#ef476f' }}>HP</span>
-                  <span>{character.hp.toLocaleString()} / {character.hpMax.toLocaleString()}</span>
-                </div>
-                <div className="progress-container">
-                  <div className="progress-bar progress-hp" style={{ width: `${(character.hp / character.hpMax) * 100}%` }}></div>
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ flex: 1, padding: '15px' }}>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', fontSize: '1rem' }}>
-                  <Activity size={18} color="var(--accent)" /> Combat Log
-                </h3>
-                <div className="combat-log" ref={logRef}>
-                  {combatLogs.map(log => (
-                    <div key={log.id} className={`log-entry log-${log.type}`}>
-                      {log.text}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-          </div>
+          <button className="btn-back" onClick={exitZone} style={{ marginBottom: '15px' }}>
+            <ArrowLeft size={18} /> Quay lại Bản đồ
+          </button>
+          <GameArena
+            activeZone={activeZone} bossHp={bossHp} bossHpMax={bossHpMax} bossStatus={bossStatus}
+            character={character} onAttack={handleAttack} isAttacking={isAttacking}
+            playersInZone={playersInZone} combatLogs={combatLogs}
+          />
         </div>
       )}
     </div>
