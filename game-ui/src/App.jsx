@@ -748,6 +748,7 @@ export default function App() {
             otherPlayersMap={otherPlayers} initialPos={initialPos}
             isDead={isDead} deathTimer={deathTimer}
             lootDrop={lootDrop} showLoot={showLoot} onCloseLoot={() => setShowLoot(false)}
+            bossPos={bossPos} bossAttackingAnim={bossAttackingAnim}
           />
         </div>
       )}
