@@ -140,7 +140,7 @@ const bossAttackTimers = {};
 function resetGuildBoss(zoneId) {
   const zone = ZONES[zoneId];
   if (!zone || zone.type !== 'guild') return;
-  guildBossState[zoneId] = { hp: zone.boss.hpMax, status: 'Đang hoạt động', lastReset: Date.now() };
+  guildBossState[zoneId] = { hp: zone.boss.hpMax, status: 'Đang hoạt động', lastReset: Date.now(), x: 650, y: 120, lastAttack: Date.now() };
 }
 
 // Initialize guild bosses
@@ -156,7 +156,7 @@ function getBossState(socketId, zoneId) {
   } else {
     const key = `${socketId}:${zoneId}`;
     if (!soloBossState[key]) {
-      soloBossState[key] = { hp: zone.boss.hpMax, status: 'Đang hoạt động' };
+      soloBossState[key] = { hp: zone.boss.hpMax, status: 'Đang hoạt động', x: 650, y: 120, lastAttack: Date.now() };
     }
     return soloBossState[key];
   }
@@ -487,46 +487,6 @@ io.on('connection', async (socket) => {
       }
     }
 
-    // Boss counter-attack on the attacker
-    const bossDmg = randomInt(zone.boss.attackDmgMin, zone.boss.attackDmgMax);
-    player.hp = Math.max(0, player.hp - bossDmg);
-
-    socket.emit('boss_attacks_you', {
-      bossName: zone.boss.name,
-      damage: bossDmg,
-      playerHp: player.hp,
-      playerHpMax: player.hpMax
-    });
-
-    // Broadcast HP change to others in zone
-    if (zone.type === 'guild') {
-      socket.to(`zone:${zoneId}`).emit('player_hp_update', {
-        name: player.name, hp: player.hp, hpMax: player.hpMax
-      });
-    }
-
-    // Check if player died
-    if (player.hp <= 0 && !player.isDead) {
-      player.isDead = true;
-      socket.emit('you_died', { killedBy: zone.boss.name });
-      if (zone.type === 'guild') {
-        socket.to(`zone:${zoneId}`).emit('player_died_in_zone', { name: player.name });
-      }
-      // Auto respawn after 5 seconds
-      setTimeout(() => {
-        if (!players.has(socket.id)) return;
-        player.isDead = false;
-        player.hp = player.hpMax;
-        player.x = 100 + randomInt(0, 200);
-        player.y = 250 + randomInt(0, 150);
-        socket.emit('you_respawned', { hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y });
-        if (zone.type === 'guild' && player.currentZone === zoneId) {
-          socket.to(`zone:${zoneId}`).emit('player_respawned_in_zone', {
-            name: player.name, hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y
-          });
-        }
-      }, 5000);
-    }
   });
 
   // ---- PLAYER MOVE ----
@@ -589,62 +549,111 @@ io.on('connection', async (socket) => {
   });
 });
 
-// ====== PERIODIC BOSS ATTACKS (guild zones) ======
-// Every 3 seconds, guild bosses attack all players in their zone
+// ====== GAME LOOP (Movement & Attacks) ======
 setInterval(() => {
+  const now = Date.now();
+  
+  // 1. Guild Bosses
   Object.keys(ZONES).forEach(zoneId => {
     const zone = ZONES[zoneId];
     if (zone.type !== 'guild') return;
-    const bossState = guildBossState[zoneId];
-    if (!bossState || bossState.hp <= 0) return;
-
+    const boss = guildBossState[zoneId];
+    if (!boss || boss.hp <= 0) return;
     const zonePlayers = getPlayersInZone(zoneId);
     if (zonePlayers.length === 0) return;
+    updateAndAttack(boss, zonePlayers, zoneId, zone, now, io, true);
+  });
 
-    // Boss area attack
+  // 2. Solo Bosses
+  Object.keys(soloBossState).forEach(key => {
+    const [socketId, zoneId] = key.split(':');
+    const boss = soloBossState[key];
+    if (!boss || boss.hp <= 0) return;
+    const pData = players.get(socketId);
+    if (!pData || pData.currentZone !== zoneId || pData.isDead) return;
+    const zone = ZONES[zoneId];
+    const sock = io.sockets.sockets.get(socketId);
+    if (!sock) return;
+    updateAndAttack(boss, [{ ...pData, socketId }], zoneId, zone, now, sock, false);
+  });
+}, 1000);
+
+function updateAndAttack(boss, targetPlayers, zoneId, zone, now, emitter, isGuild) {
+  // Find nearest player
+  let nearestP = null;
+  let minDist = Infinity;
+  targetPlayers.forEach(p => {
+    if (p.isDead) return;
+    const dx = p.x - boss.x;
+    const dy = p.y - boss.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < minDist) { minDist = dist; nearestP = p; }
+  });
+
+  if (!nearestP) return;
+
+  // Move towards nearest player (speed = 40px per sec)
+  const speed = 40;
+  if (minDist > 120) {
+    const angle = Math.atan2(nearestP.y - boss.y, nearestP.x - boss.x);
+    boss.x += Math.cos(angle) * speed;
+    boss.y += Math.sin(angle) * speed;
+    
+    if (isGuild) emitter.to(`zone:${zoneId}`).emit('boss_moved', { x: boss.x, y: boss.y, zoneId });
+    else emitter.emit('boss_moved', { x: boss.x, y: boss.y, zoneId });
+  }
+
+  // Attack every 3.5 seconds
+  if (!boss.lastAttack) boss.lastAttack = now;
+  if (now - boss.lastAttack >= 3500) {
+    boss.lastAttack = now;
     const dmg = randomInt(zone.boss.attackDmgMin, zone.boss.attackDmgMax);
-    zonePlayers.forEach(p => {
-      const playerData = players.get(p.socketId);
-      if (!playerData || playerData.isDead) return;
-      playerData.hp = Math.max(0, playerData.hp - dmg);
+    const ATTACK_RADIUS = 280; // Dodge radius
+
+    // Trigger attack animation
+    if (isGuild) emitter.to(`zone:${zoneId}`).emit('boss_attack_anim');
+    else emitter.emit('boss_attack_anim');
+
+    targetPlayers.forEach(p => {
+      const pData = players.get(p.socketId);
+      if (!pData || pData.isDead) return;
+      const dx = pData.x - boss.x;
+      const dy = pData.y - boss.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
 
       const sock = io.sockets.sockets.get(p.socketId);
-      if (sock) {
-        sock.emit('boss_attacks_you', {
-          bossName: zone.boss.name,
-          damage: dmg,
-          playerHp: playerData.hp,
-          playerHpMax: playerData.hpMax
-        });
-      }
 
-      // Broadcast HP to others
-      io.to(`zone:${zoneId}`).emit('player_hp_update', {
-        name: playerData.name, hp: playerData.hp, hpMax: playerData.hpMax
-      });
+      if (dist <= ATTACK_RADIUS) {
+        // HIT!
+        pData.hp = Math.max(0, pData.hp - dmg);
+        if (sock) sock.emit('boss_attacks_you', { bossName: zone.boss.name, damage: dmg, playerHp: pData.hp, playerHpMax: pData.hpMax });
+        
+        if (isGuild) io.to(`zone:${zoneId}`).emit('player_hp_update', { name: pData.name, hp: pData.hp, hpMax: pData.hpMax });
 
-      // Check death
-      if (playerData.hp <= 0 && !playerData.isDead) {
-        playerData.isDead = true;
-        if (sock) sock.emit('you_died', { killedBy: zone.boss.name });
-        io.to(`zone:${zoneId}`).emit('player_died_in_zone', { name: playerData.name });
-        setTimeout(() => {
-          if (!players.has(p.socketId)) return;
-          playerData.isDead = false;
-          playerData.hp = playerData.hpMax;
-          playerData.x = 100 + randomInt(0, 200);
-          playerData.y = 250 + randomInt(0, 150);
-          if (sock) sock.emit('you_respawned', { hp: playerData.hp, hpMax: playerData.hpMax, x: playerData.x, y: playerData.y });
-          if (playerData.currentZone === zoneId) {
-            io.to(`zone:${zoneId}`).emit('player_respawned_in_zone', {
-              name: playerData.name, hp: playerData.hp, hpMax: playerData.hpMax, x: playerData.x, y: playerData.y
-            });
-          }
-        }, 5000);
+        // Check death
+        if (pData.hp <= 0 && !pData.isDead) {
+          pData.isDead = true;
+          if (sock) sock.emit('you_died', { killedBy: zone.boss.name });
+          if (isGuild) io.to(`zone:${zoneId}`).emit('player_died_in_zone', { name: pData.name });
+          setTimeout(() => {
+            if (!players.has(p.socketId)) return;
+            pData.isDead = false;
+            pData.hp = pData.hpMax;
+            pData.x = 100 + randomInt(0, 200);
+            pData.y = 250 + randomInt(0, 150);
+            if (sock) sock.emit('you_respawned', { hp: pData.hp, hpMax: pData.hpMax, x: pData.x, y: pData.y });
+            if (isGuild && pData.currentZone === zoneId) {
+              io.to(`zone:${zoneId}`).emit('player_respawned_in_zone', { name: pData.name, hp: pData.hp, hpMax: pData.hpMax, x: pData.x, y: pData.y });
+            }
+          }, 5000);
+        }
+      } else {
+        // DODGED!
+        if (sock) sock.emit('player_dodged', { bossName: zone.boss.name });
       }
     });
-  });
-}, 4000);
+  }
+}
 
 // ====== SERVE STATIC BUILD ======
 app.use(express.static(path.join(__dirname, 'game-ui', 'dist')));

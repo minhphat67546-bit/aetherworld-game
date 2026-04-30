@@ -26,7 +26,7 @@ const ZONE_POSITIONS = {
 };
 
 // ====== GAME ARENA COMPONENT ======
-function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos, isDead, deathTimer, lootDrop, showLoot, onCloseLoot }) {
+function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAttack, isAttacking, playersInZone, combatLogs, otherPlayersMap, initialPos, isDead, deathTimer, lootDrop, showLoot, onCloseLoot, bossPos, bossAttackingAnim }) {
   const [playerPos, setPlayerPos] = useState(initialPos || { x: 150, y: 300 });
   const [facing, setFacing] = useState('right');
   const [isMoving, setIsMoving] = useState(false);
@@ -38,8 +38,6 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
   const ARENA_W = 900;
   const ARENA_H = 500;
   const PLAYER_SIZE = 80;
-  const BOSS_X = 650;
-  const BOSS_Y = 120;
   const BOSS_SIZE = 220;
   const ATTACK_RANGE = 180;
 
@@ -56,8 +54,8 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
       if (e.code === 'Space') {
         e.preventDefault();
         if (isDead) return;
-        const dx = (BOSS_X + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
-        const dy = (BOSS_Y + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
+        const dx = ((bossPos?.x || 650) + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
+        const dy = ((bossPos?.y || 120) + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < ATTACK_RANGE + BOSS_SIZE/2) {
           onAttack();
@@ -111,8 +109,8 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
   }, [isDead, initialPos]);
 
   // Distance check
-  const dx = (BOSS_X + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
-  const dy = (BOSS_Y + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
+  const dx = ((bossPos?.x || 650) + BOSS_SIZE/2) - (playerPos.x + PLAYER_SIZE/2);
+  const dy = ((bossPos?.y || 120) + BOSS_SIZE/2) - (playerPos.y + PLAYER_SIZE/2);
   const distToBoss = Math.sqrt(dx*dx + dy*dy);
   const inRange = distToBoss < ATTACK_RANGE + BOSS_SIZE/2;
 
@@ -133,11 +131,12 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
 
         {/* Boss */}
         <div style={{
-          position: 'absolute', left: BOSS_X, top: BOSS_Y,
+          position: 'absolute', left: bossPos?.x || 650, top: bossPos?.y || 120,
           width: BOSS_SIZE, height: BOSS_SIZE, zIndex: 2,
-          transition: 'filter 0.2s',
-          filter: bossHp <= 0 ? 'grayscale(1) brightness(0.3)' : 'none',
-          animation: bossHp > 0 ? 'bossIdle 2s ease-in-out infinite' : 'none',
+          transition: 'left 1s linear, top 1s linear, filter 0.2s, transform 0.2s',
+          filter: bossHp <= 0 ? 'grayscale(1) brightness(0.3)' : (bossAttackingAnim ? 'drop-shadow(0 0 20px rgba(255,0,0,0.8)) brightness(1.5)' : 'none'),
+          animation: bossHp > 0 && !bossAttackingAnim ? 'bossIdle 2s ease-in-out infinite' : 'none',
+          transform: bossAttackingAnim ? 'scale(1.15)' : 'scale(1)',
         }}>
           <img src={assets.boss} alt="Boss" style={{
             width: '100%', height: '100%', objectFit: 'contain',
@@ -399,6 +398,8 @@ export default function App() {
   const [deathTimer, setDeathTimer] = useState(0);
   const [lootDrop, setLootDrop] = useState(null); // { items: [], gold: 0 }
   const [showLoot, setShowLoot] = useState(false);
+  const [bossPos, setBossPos] = useState({ x: 650, y: 120 });
+  const [bossAttackingAnim, setBossAttackingAnim] = useState(false);
 
   const addLog = useCallback((text, type = 'system') => {
     setCombatLogs(prev => [{ id: Date.now() + Math.random(), text, type }, ...prev].slice(0, 50));
@@ -427,6 +428,7 @@ export default function App() {
     socket.on('zone_entered', (data) => {
       setActiveZone(data.zone); setBossHp(data.bossHp); setBossHpMax(data.zone.boss.hpMax);
       setBossStatus(data.bossStatus); setPlayersInZone(data.playersInZone);
+      setBossPos({ x: 650, y: 120 });
       setCharacter(prev => prev ? { ...prev, hp: data.player.hp, hpMax: data.player.hpMax } : prev);
       setInitialPos({ x: data.player.x || 150, y: data.player.y || 300 });
       // Load other players already in zone
@@ -459,6 +461,16 @@ export default function App() {
     socket.on('boss_attacks_you', (data) => {
       setCharacter(prev => prev ? { ...prev, hp: data.playerHp } : prev);
       addLog(`[${data.bossName}] Tấn công gây ${data.damage.toLocaleString()} sát thương!`, 'boss');
+    });
+    socket.on('boss_moved', (data) => {
+      setBossPos({ x: data.x, y: data.y });
+    });
+    socket.on('boss_attack_anim', () => {
+      setBossAttackingAnim(true);
+      setTimeout(() => setBossAttackingAnim(false), 500);
+    });
+    socket.on('player_dodged', (data) => {
+      addLog(`✨ BẠN ĐÃ NÉ THÀNH CÔNG đòn tấn công của ${data.bossName}!`, 'player');
     });
     socket.on('boss_zone_attack', () => {});
     socket.on('boss_killed', (data) => {
