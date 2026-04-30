@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { Shield, Sword, Skull, Activity, ArrowLeft, Users, User, Home, Wifi, WifiOff, Globe } from 'lucide-react';
+import { Shield, Sword, Skull, Activity, ArrowLeft, Users, User, Home, Wifi, WifiOff, Globe, Lock, LogIn, LogOut, Package } from 'lucide-react';
 
 const SOCKET_URL = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
   : window.location.origin;
-const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+const API_URL = SOCKET_URL;
+const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], autoConnect: false });
 
 // Asset mapping
 const ZONE_ASSETS = {
@@ -374,10 +375,18 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
-  const [view, setView] = useState('map');
+  const [view, setView] = useState('login'); // 'login' | 'map' | 'combat'
   const [character, setCharacter] = useState(null);
   const [zones, setZones] = useState([]);
   const [activeZone, setActiveZone] = useState(null);
+
+  // Auth state
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [bossHp, setBossHp] = useState(0);
   const [bossHpMax, setBossHpMax] = useState(1);
   const [bossStatus, setBossStatus] = useState('');
@@ -396,9 +405,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    socket.on('connect', () => setConnected(true));
+    socket.on('connect', () => {
+      setConnected(true);
+      // Send auth token if available
+      const token = localStorage.getItem('aether_token');
+      socket.emit('authenticate', { token });
+    });
     socket.on('disconnect', () => setConnected(false));
-    socket.on('init', (data) => { setCharacter(data.player); setZones(data.zones); setOnlineCount(data.onlineCount); });
+    socket.on('init', (data) => {
+      setCharacter(data.player);
+      setZones(data.zones);
+      setOnlineCount(data.onlineCount);
+      setIsLoggedIn(data.player.isLoggedIn || false);
+      
+      const hasToken = localStorage.getItem('aether_token');
+      if (view === 'loading' || (view === 'login' && hasToken && data.player.isLoggedIn)) {
+        setView('map');
+      }
+    });
     socket.on('online_count', (count) => setOnlineCount(count));
     socket.on('zone_entered', (data) => {
       setActiveZone(data.zone); setBossHp(data.bossHp); setBossHpMax(data.zone.boss.hpMax);
@@ -440,6 +464,11 @@ export default function App() {
     socket.on('boss_killed', (data) => {
       setBossStatus('Đã bị tiêu diệt'); setBossHp(0);
       addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}!`, 'system');
+      
+      if (data.newLevel || data.levelUpInfo) {
+        addLog(`🌟 CHÚC MỪNG! Bạn đã thăng cấp!`, 'system');
+      }
+
       if (data.loot) {
         setLootDrop(data.loot);
         setShowLoot(true);
@@ -447,7 +476,14 @@ export default function App() {
           addLog(`🎁 Vật phẩm rơi: ${item.icon} ${item.name} (${item.rarityLabel})`, 'guild');
         });
         addLog(`💰 Nhận được ${data.loot.gold.toLocaleString()} vàng!`, 'player');
-        // Auto close loot after 10 seconds
+        // Update character stats
+        setCharacter(prev => prev ? {
+          ...prev,
+          level: data.newLevel || (data.levelUpInfo ? prev.level + 1 : prev.level),
+          gold: (prev.gold || 0) + data.loot.gold,
+          inventory: [...(prev.inventory || []), ...data.loot.items],
+          bossKills: (prev.bossKills || 0) + 1
+        } : prev);
         setTimeout(() => setShowLoot(false), 10000);
       }
     });
@@ -494,8 +530,122 @@ export default function App() {
     setTimeout(() => setIsAttacking(false), 500);
   }, [activeZone, bossHp, isAttacking, isDead]);
 
+  // Connect socket on mount
+  useEffect(() => {
+    socket.connect();
+    return () => { socket.disconnect(); };
+  }, []);
+
+  // Auth handlers
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError(''); setAuthLoading(true);
+    try {
+      const endpoint = authMode === 'register' ? '/api/register' : '/api/login';
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) { setAuthError(data.error); setAuthLoading(false); return; }
+      localStorage.setItem('aether_token', data.token);
+      localStorage.setItem('aether_user', data.username);
+      setIsLoggedIn(true);
+      setView('loading');
+      // Reconnect socket with token
+      socket.disconnect();
+      socket.connect();
+      setAuthLoading(false);
+    } catch (err) {
+      setAuthError('Không thể kết nối server'); setAuthLoading(false);
+    }
+  };
+
+  const handleGuest = () => {
+    localStorage.removeItem('aether_token');
+    localStorage.removeItem('aether_user');
+    setView('loading');
+    socket.disconnect();
+    socket.connect();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('aether_token');
+    localStorage.removeItem('aether_user');
+    setIsLoggedIn(false);
+    setCharacter(null);
+    setView('login');
+    socket.disconnect();
+    socket.connect();
+  };
+
+  // ====== LOGIN / REGISTER SCREEN ======
+  if (view === 'login') {
+    return (
+      <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <div className="glass-panel" style={{ maxWidth: '420px', width: '100%', padding: '40px' }}>
+          <h1 className="title-font" style={{ textAlign: 'center', background: 'linear-gradient(to right, #e0aaff, #9d4edd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px', fontSize: '2.2rem' }}>AetherWorld</h1>
+          <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '30px', fontSize: '0.85rem' }}>
+            {authMode === 'login' ? 'Đăng nhập để lưu tiến trình' : 'Tạo tài khoản mới'}
+          </p>
+
+          <form onSubmit={handleAuth}>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <User size={14} style={{ verticalAlign: 'middle' }} /> Tên tài khoản
+              </label>
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)}
+                placeholder="Nhập tên tài khoản..."
+                style={{
+                  width: '100%', padding: '12px 15px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: '0.95rem', outline: 'none',
+                  boxSizing: 'border-box',
+                }} />
+            </div>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <Lock size={14} style={{ verticalAlign: 'middle' }} /> Mật khẩu
+              </label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="Nhập mật khẩu..."
+                style={{
+                  width: '100%', padding: '12px 15px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: '0.95rem', outline: 'none',
+                  boxSizing: 'border-box',
+                }} />
+            </div>
+
+            {authError && <p style={{ color: '#ef476f', fontSize: '0.85rem', marginBottom: '15px', textAlign: 'center' }}>{authError}</p>}
+
+            <button type="submit" disabled={authLoading} className="btn-action"
+              style={{ width: '100%', padding: '12px', fontSize: '1rem', background: 'linear-gradient(45deg, #9d4edd, #e0aaff)', marginBottom: '10px' }}>
+              <LogIn size={16} />
+              {authLoading ? 'Đang xử lý...' : authMode === 'login' ? 'ĐĂNG NHẬP' : 'ĐĂNG KÝ'}
+            </button>
+          </form>
+
+          <div style={{ textAlign: 'center', marginTop: '10px' }}>
+            <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }}
+              style={{ background: 'none', border: 'none', color: '#e0aaff', cursor: 'pointer', fontSize: '0.85rem' }}>
+              {authMode === 'login' ? 'Chưa có tài khoản? Đăng ký ngay' : 'Đã có tài khoản? Đăng nhập'}
+            </button>
+          </div>
+
+          <div style={{ margin: '20px 0', borderTop: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+            <span style={{ position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', background: 'var(--bg-card)', padding: '0 12px', color: 'var(--text-muted)', fontSize: '0.75rem' }}>HOẶC</span>
+          </div>
+
+          <button onClick={handleGuest} className="btn-action"
+            style={{ width: '100%', padding: '10px', fontSize: '0.9rem', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+            <Globe size={16} /> CHƠI KHÁCH (không lưu dữ liệu)
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Loading screen
-  if (!character) {
+  if (!character || view === 'loading') {
     return (
       <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
         <div className="glass-panel" style={{ textAlign: 'center', padding: '60px' }}>
@@ -524,7 +674,17 @@ export default function App() {
           <div>
             <h3 style={{ color: 'var(--secondary)', fontSize: '1rem' }}>{character.name}</h3>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{character.race} {character.class} · Lv {character.level}</p>
+            <p style={{ fontSize: '0.7rem', color: '#ffd166', marginTop: '2px' }}>
+              💰 {(character.gold || 0).toLocaleString()} · 📦 {(character.inventory || []).length} vật phẩm · ⚔️ {character.bossKills || 0} boss
+            </p>
           </div>
+          {isLoggedIn ? (
+            <button onClick={handleLogout} title="Đăng xuất" style={{ background: 'none', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', color: '#ef476f', fontSize: '0.75rem' }}>
+              <LogOut size={14} /> Thoát
+            </button>
+          ) : (
+            <span style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.1)', padding: '3px 8px', borderRadius: '6px', color: 'var(--text-muted)' }}>Khách</span>
+          )}
         </div>
       </header>
 

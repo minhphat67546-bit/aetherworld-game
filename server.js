@@ -3,14 +3,38 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { MongoClient, ObjectId } = require('mongodb');
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
+
+// ====== MONGODB ======
+const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/aetherworld_db';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_change_me';
+let db = null;
+
+async function connectDB() {
+  try {
+    const client = new MongoClient(MONGO_URI);
+    await client.connect();
+    db = client.db();
+    // Create indexes
+    await db.collection('users').createIndex({ username: 1 }, { unique: true });
+    console.log('✅ MongoDB kết nối thành công!');
+  } catch (err) {
+    console.warn('⚠️  MongoDB không khả dụng, dữ liệu sẽ chỉ lưu trong RAM:', err.message);
+  }
+}
+connectDB();
 
 // ====== GAME STATE ======
 const NAMES_POOL = [
@@ -150,43 +174,162 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// ====== SAVE/LOAD PLAYER DATA ======
+async function savePlayerToDB(playerData) {
+  if (!db || !playerData.userId) return;
+  try {
+    await db.collection('characters').updateOne(
+      { userId: playerData.userId },
+      { $set: {
+        name: playerData.name, class: playerData.class, race: playerData.race,
+        level: playerData.level, hp: playerData.hp, hpMax: playerData.hpMax,
+        combatRating: playerData.combatRating,
+        gold: playerData.gold || 0,
+        inventory: playerData.inventory || [],
+        bossKills: playerData.bossKills || 0,
+        lastSeen: new Date()
+      }},
+      { upsert: true }
+    );
+  } catch (e) { console.error('Save error:', e.message); }
+}
+
+async function loadPlayerFromDB(userId) {
+  if (!db) return null;
+  try {
+    return await db.collection('characters').findOne({ userId });
+  } catch (e) { return null; }
+}
+
+// ====== AUTH ROUTES ======
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Tên tài khoản và mật khẩu là bắt buộc' });
+  if (username.length < 3) return res.status(400).json({ error: 'Tên tài khoản phải có ít nhất 3 ký tự' });
+  if (password.length < 4) return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 4 ký tự' });
+  if (!db) return res.status(500).json({ error: 'Database chưa sẵn sàng' });
+
+  try {
+    const existing = await db.collection('users').findOne({ username: username.toLowerCase() });
+    if (existing) return res.status(409).json({ error: 'Tên tài khoản đã tồn tại' });
+
+    const hashedPw = await bcrypt.hash(password, 10);
+    const result = await db.collection('users').insertOne({
+      username: username.toLowerCase(),
+      password: hashedPw,
+      createdAt: new Date()
+    });
+
+    // Create initial character
+    const charName = NAMES_POOL[randomInt(0, NAMES_POOL.length - 1)] + '_' + randomInt(10, 99);
+    await db.collection('characters').insertOne({
+      userId: result.insertedId.toString(),
+      name: charName,
+      class: CLASSES[randomInt(0, CLASSES.length - 1)],
+      race: RACES[randomInt(0, RACES.length - 1)],
+      level: 1,
+      hp: 48000, hpMax: 48000,
+      combatRating: randomInt(8000, 15000),
+      gold: 0, inventory: [], bossKills: 0,
+      createdAt: new Date(), lastSeen: new Date()
+    });
+
+    const token = jwt.sign({ userId: result.insertedId.toString(), username: username.toLowerCase() }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, username: username.toLowerCase() });
+  } catch (e) {
+    res.status(500).json({ error: 'Lỗi server: ' + e.message });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Thiếu thông tin đăng nhập' });
+  if (!db) return res.status(500).json({ error: 'Database chưa sẵn sàng' });
+
+  try {
+    const user = await db.collection('users').findOne({ username: username.toLowerCase() });
+    if (!user) return res.status(401).json({ error: 'Tài khoản không tồn tại' });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(401).json({ error: 'Sai mật khẩu' });
+
+    const token = jwt.sign({ userId: user._id.toString(), username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, username: user.username });
+  } catch (e) {
+    res.status(500).json({ error: 'Lỗi server: ' + e.message });
+  }
+});
+
+app.get('/api/verify', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Không có token' });
+  try {
+    const decoded = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET);
+    res.json({ userId: decoded.userId, username: decoded.username });
+  } catch {
+    res.status(401).json({ error: 'Token hết hạn hoặc không hợp lệ' });
+  }
+});
+
 // ====== SOCKET HANDLING ======
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   console.log(`[+] Player connected: ${socket.id}`);
+  let isAuthenticated = false;
 
-  // Assign a random character
-  const playerName = NAMES_POOL[randomInt(0, NAMES_POOL.length - 1)] + '_' + randomInt(10, 99);
-  const playerClass = CLASSES[randomInt(0, CLASSES.length - 1)];
-  const playerRace = RACES[randomInt(0, RACES.length - 1)];
-  const level = randomInt(60, 95);
+  // ---- AUTH via socket ----
+  socket.on('authenticate', async (data) => {
+    let userId = null;
+    let charData = null;
 
-  const playerData = {
-    name: playerName,
-    class: playerClass,
-    race: playerRace,
-    level,
-    hp: 48000,
-    hpMax: 48000,
-    combatRating: randomInt(8000, 15000),
-    currentZone: null,
-    x: 150,
-    y: 300,
-    isDead: false
-  };
-  players.set(socket.id, playerData);
+    if (data.token) {
+      try {
+        const decoded = jwt.verify(data.token, JWT_SECRET);
+        userId = decoded.userId;
+        charData = await loadPlayerFromDB(userId);
+      } catch { /* invalid token, play as guest */ }
+    }
 
-  // Send init data to the player
-  socket.emit('init', {
-    player: playerData,
-    zones: Object.values(ZONES).map(z => ({
-      id: z.id, name: z.name, type: z.type,
-      boss: { name: z.boss.name, level: z.boss.level, hpMax: z.boss.hpMax, difficulty: z.boss.difficulty }
-    })),
-    onlineCount: players.size
+    let playerData;
+    if (charData) {
+      // Logged-in player with saved data
+      playerData = {
+        name: charData.name, class: charData.class, race: charData.race,
+        level: charData.level, hp: charData.hpMax, hpMax: charData.hpMax,
+        combatRating: charData.combatRating,
+        gold: charData.gold || 0, inventory: charData.inventory || [],
+        bossKills: charData.bossKills || 0,
+        userId, currentZone: null, x: 150, y: 300, isDead: false
+      };
+      isAuthenticated = true;
+    } else {
+      // Guest player
+      const playerName = NAMES_POOL[randomInt(0, NAMES_POOL.length - 1)] + '_' + randomInt(10, 99);
+      playerData = {
+        name: playerName, class: CLASSES[randomInt(0, CLASSES.length - 1)],
+        race: RACES[randomInt(0, RACES.length - 1)], level: 1,
+        hp: 48000, hpMax: 48000, combatRating: randomInt(8000, 15000),
+        gold: 0, inventory: [], bossKills: 0,
+        userId: null, currentZone: null, x: 150, y: 300, isDead: false
+      };
+    }
+    players.set(socket.id, playerData);
+
+    socket.emit('init', {
+      player: {
+        name: playerData.name, class: playerData.class, race: playerData.race,
+        level: playerData.level, hp: playerData.hp, hpMax: playerData.hpMax,
+        combatRating: playerData.combatRating,
+        gold: playerData.gold, inventory: playerData.inventory,
+        bossKills: playerData.bossKills, isLoggedIn: isAuthenticated
+      },
+      zones: Object.values(ZONES).map(z => ({
+        id: z.id, name: z.name, type: z.type,
+        boss: { name: z.boss.name, level: z.boss.level, hpMax: z.boss.hpMax, difficulty: z.boss.difficulty }
+      })),
+      onlineCount: players.size
+    });
+    io.emit('online_count', players.size);
   });
-
-  // Broadcast updated online count
-  io.emit('online_count', players.size);
 
   // ---- ENTER ZONE ----
   socket.on('enter_zone', (zoneId) => {
@@ -288,11 +431,30 @@ io.on('connection', (socket) => {
       io.to(`zone:${zoneId}`).emit('attack_result', attackResult);
       if (bossState.hp <= 0) {
         const loot = generateLoot(zoneId);
+        
+        // Random Race Change Token for everyone in zone
+        if (Math.random() < 0.3) { // 30% chance
+           loot.items.push({ name: 'Thẻ Đổi Tộc', rarity: 'legendary', icon: '🎭', type: 'Đặc biệt', rarityLabel: '🟧 Legendary', color: '#ff9f1c' });
+        }
+
         io.to(`zone:${zoneId}`).emit('boss_killed', {
           killerName: player.name,
           bossName: zone.boss.name,
           zoneId,
-          loot
+          loot,
+          levelUpInfo: true // flag to tell client they leveled up
+        });
+        // Save loot for all players in zone
+        const zonePlayers = getPlayersInZone(zoneId);
+        zonePlayers.forEach(p => {
+          const pd = players.get(p.socketId);
+          if (pd) {
+            pd.level += 1;
+            pd.gold = (pd.gold || 0) + loot.gold;
+            pd.inventory = [...(pd.inventory || []), ...loot.items.map(i => ({ name: i.name, rarity: i.rarity, icon: i.icon, type: i.type }))];
+            pd.bossKills = (pd.bossKills || 0) + 1;
+            savePlayerToDB(pd);
+          }
         });
         // Respawn boss after 15 seconds
         setTimeout(() => {
@@ -309,7 +471,19 @@ io.on('connection', (socket) => {
       socket.emit('attack_result', attackResult);
       if (bossState.hp <= 0) {
         const loot = generateLoot(zoneId);
-        socket.emit('boss_killed', { killerName: player.name, bossName: zone.boss.name, zoneId, loot });
+        
+        // Level up and random Race Change Token
+        player.level += 1;
+        if (Math.random() < 0.3) { // 30% chance
+           loot.items.push({ name: 'Thẻ Đổi Tộc', rarity: 'legendary', icon: '🎭', type: 'Đặc biệt', rarityLabel: '🟧 Legendary', color: '#ff9f1c' });
+        }
+
+        socket.emit('boss_killed', { killerName: player.name, bossName: zone.boss.name, zoneId, loot, newLevel: player.level });
+        // Save loot to player
+        player.gold = (player.gold || 0) + loot.gold;
+        player.inventory = [...(player.inventory || []), ...loot.items.map(i => ({ name: i.name, rarity: i.rarity, icon: i.icon, type: i.type }))];
+        player.bossKills = (player.bossKills || 0) + 1;
+        savePlayerToDB(player);
       }
     }
 
@@ -391,8 +565,10 @@ io.on('connection', (socket) => {
   });
 
   // ---- DISCONNECT ----
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     const player = players.get(socket.id);
+    // Save to DB before removing
+    if (player) await savePlayerToDB(player);
     if (player && player.currentZone) {
       const zoneId = player.currentZone;
       socket.leave(`zone:${zoneId}`);
