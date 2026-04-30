@@ -1,0 +1,21 @@
+{
+  "name": "aetherworld-mmorpg",
+  "version": "1.0.0",
+  "description": "AetherWorld MMORPG - Multiplayer Boss Raid Game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "cd game-ui && npm install && npm run build",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mongodb": "^7.2.0",
+    "socket.io": "^4.8.3"
+  }
+}

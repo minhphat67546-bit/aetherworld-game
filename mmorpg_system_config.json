@@ -1,0 +1,1243 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "system": {
+    "name": "AetherWorld MMORPG Platform",
+    "version": "1.0.0",
+    "description": "Hệ thống backend cho MMORPG: quản lý nhân vật, guild, quest, boss raid, combat log, deep learning AI và real-time streaming.",
+    "environment": "production",
+    "game_world": "AetherWorld",
+    "max_concurrent_players": 50000
+  },
+
+  "modules": {
+
+    "game_bot": {
+      "_meta": {
+        "description": "Module Game Engine & Bot NPC: quản lý vòng lặp game, bot AI điều phối NPC, boss AI, và hệ thống reward tự động.",
+        "collections_used": ["nhan_vat", "guild", "quest_log", "boss_raid", "leaderboard_snapshot"]
+      },
+      "game_loop": {
+        "tick_rate_ms": 100,
+        "world_zones": [
+          "Rừng Bóng Tối", "Thành Cổ Aether", "Vùng Núi Lửa Kael",
+          "Đại Dương Vực Thẳm", "Tháp Phù Thủy Vĩnh Cửu", "Đồng Bằng Huyết Chiến"
+        ],
+        "max_players_per_zone": 500,
+        "day_night_cycle_minutes": 60
+      },
+      "leaderboard": {
+        "source_collection": "leaderboard_snapshot",
+        "ranking_scopes": ["Server", "Guild", "Class", "PvP", "PvE"],
+        "refresh_interval_seconds": 60,
+        "rank_to_title_map": {
+          1: "👑 Huyền Thoại",
+          "top_10": "⚔️ Chiến Thần",
+          "top_100": "🌟 Dũng Sĩ",
+          "top_1000": "🛡️ Hiệp Sĩ"
+        },
+        "display_fields": [
+          "character_uid", "ten_nhan_vat", "cap_do", "diem_xep_hang",
+          "class", "guild_id", "combat_rating"
+        ]
+      },
+      "achievement_engine": {
+        "triggers": [
+          {
+            "event": "level_reached_max",
+            "condition": { "cap_do": { "$gte": 100 } },
+            "badge": "🏆 Thần Cấp",
+            "reward": { "gold": 100000, "item_id": "legendary_crown" },
+            "notify_channel": "world_broadcast"
+          },
+          {
+            "event": "boss_first_kill",
+            "condition": { "boss_id": { "$exists": true }, "thu_hang_tiet_diet": 1 },
+            "badge": "☠️ Kẻ Diệt Boss",
+            "reward": { "gold": 50000, "title": "Boss Slayer" },
+            "notify_channel": "world_broadcast"
+          },
+          {
+            "event": "guild_war_champion",
+            "condition": { "guild_war_wins": { "$gte": 10 } },
+            "badge": "⚔️ Bá Chủ Guild",
+            "reward": { "guild_buff": "war_glory_aura_7d" },
+            "notify_channel": "guild_chat"
+          },
+          {
+            "event": "quest_chain_completed",
+            "condition": { "quest_chain_id": { "$exists": true }, "so_quest_hoan_thanh": { "$gte": 20 } },
+            "badge": "📜 Sử Ký Huyền Thoại",
+            "reward": { "exp_bonus_percent": 20, "duration_hours": 24 },
+            "notify_channel": "personal"
+          },
+          {
+            "event": "pvp_kill_streak_10",
+            "condition": { "pvp_kill_streak": { "$gte": 10 } },
+            "badge": "🔥 Cuồng Sát",
+            "reward": { "pvp_point_bonus": 500 },
+            "notify_channel": "zone_broadcast"
+          }
+        ]
+      },
+      "npc_bot": {
+        "engine": "rule-based + ML hybrid",
+        "npc_types": ["Merchant", "QuestGiver", "Guard", "BossMinion", "AlliedNPC"],
+        "behavior_tree": {
+          "Merchant": ["idle", "greet_player", "open_shop", "haggle", "farewell"],
+          "Guard": ["patrol", "detect_threat", "chase", "attack", "return_to_post"],
+          "BossMinion": ["spawn", "aggro_player", "use_skill", "retreat", "respawn"]
+        },
+        "dialogue_bot": {
+          "engine": "claude-sonnet",
+          "supported_intents": [
+            "query_quest_status",
+            "ask_lore",
+            "request_hint",
+            "trade_negotiation",
+            "dungeon_guide",
+            "pvp_challenge",
+            "guild_recruitment"
+          ],
+          "language": "vi",
+          "max_tokens_per_response": 500,
+          "personality_profiles": ["friendly_elder", "grumpy_warrior", "mysterious_mage", "cheerful_merchant"]
+        }
+      },
+      "boss_ai": {
+        "difficulty_scaling": true,
+        "scale_based_on": ["so_nguoi_choi_trong_raid", "avg_combat_rating_of_party", "server_population"],
+        "phase_system": {
+          "enabled": true,
+          "phases": [
+            { "phase": 1, "hp_threshold_percent": 100, "behavior": "normal" },
+            { "phase": 2, "hp_threshold_percent": 60, "behavior": "enraged", "new_skills": ["ground_slam", "aoe_poison"] },
+            { "phase": 3, "hp_threshold_percent": 25, "behavior": "berserk", "new_skills": ["meteor_rain", "death_mark"] }
+          ]
+        },
+        "respawn_schedule": "0 */4 * * *"
+      }
+    },
+
+    "streaming": {
+      "_meta": {
+        "description": "Module streaming tốc độ cao: real-time combat events, player movement, boss health, guild wars, loot drops.",
+        "collections_used": ["combat_log", "nhan_vat", "boss_raid", "guild_war", "auction_house"]
+      },
+      "broker": {
+        "type": "Kafka",
+        "bootstrap_servers": ["kafka-game-1:9092", "kafka-game-2:9092", "kafka-game-3:9092"],
+        "replication_factor": 3,
+        "compression": "lz4",
+        "max_message_bytes": 1048576
+      },
+      "topics": [
+        {
+          "name": "combat.event",
+          "source_collection": "combat_log",
+          "trigger_on": ["insert"],
+          "partitions": 16,
+          "retention_ms": 86400000,
+          "payload_fields": [
+            "attacker_uid", "defender_uid", "ky_nang_su_dung", "sat_thuong",
+            "co_gay_miss", "co_gay_crit", "zone_id", "timestamp"
+          ],
+          "consumers": [
+            "streaming.combat_stats_aggregator",
+            "streaming.anti_cheat_detector",
+            "streaming.pvp_rating_updater"
+          ]
+        },
+        {
+          "name": "player.movement",
+          "source_collection": null,
+          "trigger_on": ["game_server_emit"],
+          "partitions": 32,
+          "retention_ms": 3600000,
+          "payload_fields": ["character_uid", "zone_id", "position_x", "position_y", "position_z", "timestamp"],
+          "consumers": [
+            "streaming.minimap_updater",
+            "streaming.anti_cheat_movement_validator"
+          ]
+        },
+        {
+          "name": "boss.health_tick",
+          "source_collection": "boss_raid",
+          "trigger_on": ["update"],
+          "trigger_condition": { "field": "hp_hien_tai", "operator": "$changed" },
+          "partitions": 4,
+          "retention_ms": 3600000,
+          "payload_fields": ["boss_id", "ten_boss", "hp_hien_tai", "hp_toi_da", "phase_hien_tai", "zone_id", "timestamp"],
+          "consumers": [
+            "streaming.boss_ui_broadcaster",
+            "streaming.phase_transition_trigger",
+            "streaming.raid_dps_calculator"
+          ]
+        },
+        {
+          "name": "quest.status_changed",
+          "source_collection": "quest_log",
+          "trigger_on": ["update"],
+          "trigger_condition": { "field": "trang_thai", "operator": "$changed" },
+          "partitions": 8,
+          "retention_ms": 604800000,
+          "payload_fields": ["character_uid", "quest_id", "trang_thai", "tien_do_hien_tai", "tien_do_muc_tieu", "timestamp"],
+          "consumers": [
+            "streaming.achievement_engine",
+            "streaming.exp_reward_distributor",
+            "streaming.quest_analytics_aggregator"
+          ]
+        },
+        {
+          "name": "guild.war_event",
+          "source_collection": "guild_war",
+          "trigger_on": ["insert", "update"],
+          "partitions": 4,
+          "retention_ms": 2592000000,
+          "payload_fields": ["guild_id_attacker", "guild_id_defender", "su_kien", "diem_tan_cong", "diem_phong_thu", "timestamp"],
+          "consumers": [
+            "streaming.guild_leaderboard_updater",
+            "streaming.war_timeline_recorder",
+            "streaming.guild_war_notifier"
+          ]
+        },
+        {
+          "name": "economy.auction_bid",
+          "source_collection": "auction_house",
+          "trigger_on": ["insert", "update"],
+          "partitions": 6,
+          "retention_ms": 604800000,
+          "payload_fields": ["item_id", "ten_item", "gia_hien_tai", "nguoi_dau_gia_uid", "thoi_gian_ket_thuc", "timestamp"],
+          "consumers": [
+            "streaming.auction_price_tracker",
+            "streaming.economy_inflation_monitor",
+            "streaming.anti_exploit_detector"
+          ]
+        },
+        {
+          "name": "loot.drop",
+          "source_collection": "combat_log",
+          "trigger_on": ["insert"],
+          "trigger_condition": { "field": "loot_drop", "operator": "$ne", "value": null },
+          "partitions": 8,
+          "retention_ms": 604800000,
+          "payload_fields": ["character_uid", "monster_id", "loot_drop.item_id", "loot_drop.do_hiem", "zone_id", "timestamp"],
+          "consumers": [
+            "streaming.loot_history_recorder",
+            "streaming.drop_rate_ml_trainer",
+            "streaming.rare_drop_world_announcer"
+          ]
+        }
+      ],
+      "throughput": {
+        "target_events_per_second": 500000,
+        "max_lag_ms": 50,
+        "batch_size": 1000,
+        "note": "Combat events at peak: ~500k eps for 50k concurrent players"
+      },
+      "websocket_gateway": {
+        "enabled": true,
+        "port": 9090,
+        "protocol": "WSS",
+        "auth": "JWT + GameSessionToken",
+        "push_channels": [
+          "zone.{zone_id}.players",
+          "boss.{boss_id}.health",
+          "guild.{guild_id}.chat",
+          "player.{character_uid}.notifications",
+          "world.broadcast",
+          "auction.{item_id}.bids",
+          "leaderboard.live"
+        ],
+        "compression": "permessage-deflate"
+      },
+      "game_state_sync": {
+        "engine": "Redis",
+        "ttl_seconds": 3600,
+        "keys": [
+          "player:{character_uid}:position",
+          "player:{character_uid}:stats",
+          "boss:{boss_id}:hp",
+          "zone:{zone_id}:players",
+          "guild:{guild_id}:war_score"
+        ]
+      }
+    },
+
+    "mongodb_backend": {
+      "_meta": {
+        "description": "Toàn bộ schema, index, aggregation pipeline cho MMORPG backend.",
+        "database": "aetherworld_db",
+        "id_convention": "UUID v7 cho domain keys, MongoDB ObjectId cho _id"
+      },
+      "connection": {
+        "uri_env": "MONGODB_URI",
+        "pool_size": 200,
+        "read_preference": "secondaryPreferred",
+        "write_concern": { "w": "majority", "j": true },
+        "retry_writes": true
+      },
+      "collections": [
+        {
+          "_id": "nhan_vat",
+          "title": "Nhân vật (Character)",
+          "primary_key": "character_uid",
+          "merge_strategy": { "on": "character_uid", "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Nhân vật",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string", "description": "MongoDB ObjectId" },
+              "character_uid": { "type": "string", "format": "uuid", "description": "UUID v7 định danh nhân vật" },
+              "account_uid": { "type": "string", "format": "uuid", "description": "UUID v7 tài khoản chủ sở hữu" },
+              "ten_nhan_vat": { "type": "string", "maxLength": 24 },
+              "class": {
+                "type": "string",
+                "enum": ["Warrior", "Mage", "Rogue", "Paladin", "Hunter", "Priest", "Necromancer", "Druid", "Berserker", "Summoner"]
+              },
+              "race": {
+                "type": "string",
+                "enum": ["Human", "Elf", "Dwarf", "Orc", "Undead", "Dragon-kin", "Fae"]
+              },
+              "cap_do": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "exp_hien_tai": { "type": "integer", "minimum": 0 },
+              "exp_len_cap_tiep": { "type": "integer", "minimum": 0 },
+              "chi_so": {
+                "type": "object",
+                "properties": {
+                  "hp_toi_da": { "type": "integer" },
+                  "hp_hien_tai": { "type": "integer" },
+                  "mana_toi_da": { "type": "integer" },
+                  "mana_hien_tai": { "type": "integer" },
+                  "tan_cong_vat_ly": { "type": "integer" },
+                  "tan_cong_phep": { "type": "integer" },
+                  "phong_thu": { "type": "integer" },
+                  "toc_do_danh": { "type": "number" },
+                  "ty_le_crit_percent": { "type": "number" },
+                  "combat_rating": { "type": "integer" }
+                }
+              },
+              "gold": { "type": "integer", "minimum": 0 },
+              "diamond": { "type": "integer", "minimum": 0, "description": "Premium currency" },
+              "zone_hien_tai": { "type": "string" },
+              "guild_id": { "type": ["string", "null"], "format": "uuid" },
+              "trang_thai": {
+                "type": "string",
+                "enum": ["Online", "Offline", "In-Dungeon", "In-PvP", "AFK", "Banned"]
+              },
+              "pvp_rating": { "type": "integer", "minimum": 0, "default": 1000 },
+              "tong_thoi_gian_choi_giay": { "type": "integer", "minimum": 0 },
+              "lan_dang_nhap_cuoi": { "type": "string", "format": "date-time" },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "character_uid", "account_uid", "ten_nhan_vat", "class", "race", "cap_do", "trang_thai", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "jsonSample": [
+            {
+              "_id": "char_672c8a2c5b8e4e0e8f2a1b01",
+              "character_uid": "01926d2c-a8d1-7c3e-8f2a-aabbccddeeff",
+              "account_uid": "01926d2c-b9e2-7a4f-9a3b-112233445566",
+              "ten_nhan_vat": "ShadowBlade",
+              "class": "Rogue",
+              "race": "Elf",
+              "cap_do": 87,
+              "exp_hien_tai": 4500000,
+              "exp_len_cap_tiep": 5000000,
+              "chi_so": {
+                "hp_toi_da": 48000, "hp_hien_tai": 48000,
+                "mana_toi_da": 12000, "mana_hien_tai": 12000,
+                "tan_cong_vat_ly": 8500, "tan_cong_phep": 200,
+                "phong_thu": 3200, "toc_do_danh": 1.8,
+                "ty_le_crit_percent": 32.5, "combat_rating": 12450
+              },
+              "gold": 2500000,
+              "diamond": 320,
+              "zone_hien_tai": "Rừng Bóng Tối",
+              "guild_id": "01926d2c-c0f3-7b6a-9e5d-223344556677",
+              "trang_thai": "Online",
+              "pvp_rating": 2340,
+              "tong_thoi_gian_choi_giay": 1296000,
+              "lan_dang_nhap_cuoi": "2026-04-30T10:00:00Z",
+              "createdAt": "2025-01-01T00:00:00Z",
+              "updatedAt": "2026-04-30T10:00:00Z"
+            }
+          ],
+          "indexes": [
+            { "fields": { "character_uid": 1 }, "unique": true },
+            { "fields": { "account_uid": 1 } },
+            { "fields": { "guild_id": 1 } },
+            { "fields": { "cap_do": -1 } },
+            { "fields": { "pvp_rating": -1 } },
+            { "fields": { "trang_thai": 1 } },
+            { "fields": { "zone_hien_tai": 1 } }
+          ]
+        },
+        {
+          "_id": "guild",
+          "title": "Guild",
+          "primary_key": "guild_id",
+          "merge_strategy": { "on": "guild_id", "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Guild",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "guild_id": { "type": "string", "format": "uuid" },
+              "ten_guild": { "type": "string", "maxLength": 32 },
+              "mo_ta": { "type": ["string", "null"], "maxLength": 500 },
+              "chu_guild_uid": { "type": "string", "format": "uuid" },
+              "cap_guild": { "type": "integer", "minimum": 1, "maximum": 10 },
+              "so_thanh_vien": { "type": "integer", "minimum": 1 },
+              "so_thanh_vien_toi_da": { "type": "integer", "default": 50 },
+              "diem_guild": { "type": "integer", "minimum": 0 },
+              "thu_hang_server": { "type": ["integer", "null"] },
+              "quy_guild": { "type": "integer", "minimum": 0, "description": "Guild bank gold" },
+              "emblem_url": { "type": ["string", "null"] },
+              "trang_thai": { "type": "string", "enum": ["Active", "Disbanded", "At-War", "Recruiting"] },
+              "ngay_thanh_lap": { "type": "string", "format": "date" },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "guild_id", "ten_guild", "chu_guild_uid", "cap_guild", "trang_thai", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "jsonSample": [
+            {
+              "_id": "guild_672c8a2c5b8e4e0e8f2a1b02",
+              "guild_id": "01926d2c-c0f3-7b6a-9e5d-223344556677",
+              "ten_guild": "Eternal Phoenix",
+              "mo_ta": "Guild chiến đấu đỉnh cao server AetherWorld.",
+              "chu_guild_uid": "01926d2c-a8d1-7c3e-8f2a-aabbccddeeff",
+              "cap_guild": 8,
+              "so_thanh_vien": 47,
+              "so_thanh_vien_toi_da": 50,
+              "diem_guild": 9850000,
+              "thu_hang_server": 1,
+              "quy_guild": 150000000,
+              "emblem_url": "https://cdn.aetherworld.vn/emblems/eternal_phoenix.png",
+              "trang_thai": "Active",
+              "ngay_thanh_lap": "2025-03-15",
+              "createdAt": "2025-03-15T08:00:00Z",
+              "updatedAt": "2026-04-30T10:00:00Z"
+            }
+          ],
+          "indexes": [
+            { "fields": { "guild_id": 1 }, "unique": true },
+            { "fields": { "diem_guild": -1 } },
+            { "fields": { "thu_hang_server": 1 } },
+            { "fields": { "trang_thai": 1 } }
+          ]
+        },
+        {
+          "_id": "quest_log",
+          "title": "Quest Log",
+          "primary_key": ["character_uid", "quest_id"],
+          "merge_strategy": { "on": ["character_uid", "quest_id"], "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Quest Log",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "character_uid": { "type": "string", "format": "uuid" },
+              "quest_id": { "type": "string", "format": "uuid" },
+              "ten_quest": { "type": "string" },
+              "loai_quest": {
+                "type": "string",
+                "enum": ["Main Story", "Side Quest", "Daily", "Weekly", "Guild Quest", "Event", "Hidden"]
+              },
+              "do_kho": { "type": "string", "enum": ["F", "E", "D", "C", "B", "A", "S", "SS", "SSS"] },
+              "trang_thai": {
+                "type": "string",
+                "enum": ["Chưa nhận", "Đang làm", "Hoàn thành", "Thất bại", "Bỏ qua"]
+              },
+              "tien_do_hien_tai": { "type": "integer", "minimum": 0 },
+              "tien_do_muc_tieu": { "type": "integer", "minimum": 1 },
+              "phan_thuong": {
+                "type": "object",
+                "properties": {
+                  "exp": { "type": "integer" },
+                  "gold": { "type": "integer" },
+                  "items": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "thoi_gian_nhan": { "type": ["string", "null"], "format": "date-time" },
+              "thoi_gian_hoan_thanh": { "type": ["string", "null"], "format": "date-time" },
+              "het_han": { "type": ["string", "null"], "format": "date-time" },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "character_uid", "quest_id", "ten_quest", "loai_quest", "do_kho", "trang_thai", "tien_do_muc_tieu", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "indexes": [
+            { "fields": { "character_uid": 1, "trang_thai": 1 } },
+            { "fields": { "quest_id": 1 } },
+            { "fields": { "loai_quest": 1 } },
+            { "fields": { "het_han": 1 } }
+          ]
+        },
+        {
+          "_id": "boss_raid",
+          "title": "Boss Raid",
+          "primary_key": "raid_id",
+          "merge_strategy": { "on": "raid_id", "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Boss Raid",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "raid_id": { "type": "string", "format": "uuid" },
+              "boss_id": { "type": "string" },
+              "ten_boss": { "type": "string" },
+              "zone_id": { "type": "string" },
+              "cap_do_boss": { "type": "integer", "minimum": 1 },
+              "do_kho": { "type": "string", "enum": ["Normal", "Hard", "Nightmare", "Mythic"] },
+              "hp_toi_da": { "type": "integer" },
+              "hp_hien_tai": { "type": "integer" },
+              "phase_hien_tai": { "type": "integer", "minimum": 1, "maximum": 3 },
+              "trang_thai": {
+                "type": "string",
+                "enum": ["Sắp xuất hiện", "Đang hoạt động", "Đã bị tiêu diệt", "Đang hồi sinh"]
+              },
+              "danh_sach_nguoi_raid": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "character_uid": { "type": "string" },
+                    "guild_id": { "type": ["string", "null"] },
+                    "sat_thuong_gay_ra": { "type": "integer" },
+                    "sat_thuong_nhan": { "type": "integer" },
+                    "co_song_sot": { "type": "boolean" }
+                  }
+                }
+              },
+              "thu_hang_tiet_diet": { "type": ["integer", "null"] },
+              "character_uid_tiet_diet_cuoi": { "type": ["string", "null"] },
+              "thoi_gian_xuat_hien": { "type": "string", "format": "date-time" },
+              "thoi_gian_bi_tiet_diet": { "type": ["string", "null"], "format": "date-time" },
+              "loot_table": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "item_id": { "type": "string" },
+                    "ten_item": { "type": "string" },
+                    "do_hiem": { "type": "string", "enum": ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"] },
+                    "ty_le_drop_percent": { "type": "number" }
+                  }
+                }
+              },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "raid_id", "boss_id", "ten_boss", "zone_id", "trang_thai", "hp_toi_da", "hp_hien_tai", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "indexes": [
+            { "fields": { "raid_id": 1 }, "unique": true },
+            { "fields": { "boss_id": 1 } },
+            { "fields": { "zone_id": 1, "trang_thai": 1 } },
+            { "fields": { "trang_thai": 1 } },
+            { "fields": { "thoi_gian_xuat_hien": -1 } }
+          ]
+        },
+        {
+          "_id": "combat_log",
+          "title": "Combat Log",
+          "primary_key": "_id",
+          "merge_strategy": { "on": "_id", "whenMatched": "keepExisting", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Combat Log",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "attacker_uid": { "type": "string", "description": "character_uid hoặc monster_id" },
+              "attacker_type": { "type": "string", "enum": ["Player", "Monster", "Boss", "NPC"] },
+              "defender_uid": { "type": "string" },
+              "defender_type": { "type": "string", "enum": ["Player", "Monster", "Boss", "NPC"] },
+              "ky_nang_su_dung": { "type": "string" },
+              "sat_thuong": { "type": "integer", "minimum": 0 },
+              "loai_sat_thuong": { "type": "string", "enum": ["Physical", "Magic", "True", "DoT", "Heal"] },
+              "co_gay_miss": { "type": "boolean", "default": false },
+              "co_gay_crit": { "type": "boolean", "default": false },
+              "he_so_crit": { "type": ["number", "null"] },
+              "zone_id": { "type": "string" },
+              "raid_id": { "type": ["string", "null"] },
+              "loot_drop": {
+                "type": ["object", "null"],
+                "properties": {
+                  "item_id": { "type": "string" },
+                  "ten_item": { "type": "string" },
+                  "do_hiem": { "type": "string" },
+                  "so_luong": { "type": "integer" }
+                }
+              },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "attacker_uid", "attacker_type", "defender_uid", "defender_type", "sat_thuong", "zone_id", "timestamp", "createdAt"],
+            "additionalProperties": false
+          },
+          "jsonSample": [
+            {
+              "_id": "clog_672c8a2c5b8e4e0e8f2a1b05",
+              "attacker_uid": "01926d2c-a8d1-7c3e-8f2a-aabbccddeeff",
+              "attacker_type": "Player",
+              "defender_uid": "boss_kaelthas_v3",
+              "defender_type": "Boss",
+              "ky_nang_su_dung": "Shadowstrike",
+              "sat_thuong": 145200,
+              "loai_sat_thuong": "Physical",
+              "co_gay_miss": false,
+              "co_gay_crit": true,
+              "he_so_crit": 2.1,
+              "zone_id": "Vùng Núi Lửa Kael",
+              "raid_id": "raid_0192abc-def1-7abc-8def-001122334455",
+              "loot_drop": null,
+              "timestamp": "2026-04-30T10:15:32Z",
+              "createdAt": "2026-04-30T10:15:32Z"
+            }
+          ],
+          "indexes": [
+            { "fields": { "attacker_uid": 1, "timestamp": -1 } },
+            { "fields": { "defender_uid": 1, "timestamp": -1 } },
+            { "fields": { "zone_id": 1, "timestamp": -1 } },
+            { "fields": { "raid_id": 1 } },
+            { "fields": { "timestamp": -1 } },
+            { "fields": { "co_gay_crit": 1 } }
+          ],
+          "ttl_index": { "field": "timestamp", "expire_after_seconds": 2592000, "note": "Xóa log cũ hơn 30 ngày" }
+        },
+        {
+          "_id": "guild_war",
+          "title": "Guild War",
+          "primary_key": "war_id",
+          "merge_strategy": { "on": "war_id", "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Guild War",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "war_id": { "type": "string", "format": "uuid" },
+              "guild_id_attacker": { "type": "string", "format": "uuid" },
+              "guild_id_defender": { "type": "string", "format": "uuid" },
+              "trang_thai": { "type": "string", "enum": ["Chuẩn bị", "Đang chiến", "Kết thúc", "Hòa giải"] },
+              "diem_tan_cong": { "type": "integer", "minimum": 0 },
+              "diem_phong_thu": { "type": "integer", "minimum": 0 },
+              "guild_thang": { "type": ["string", "null"], "format": "uuid" },
+              "thoi_gian_bat_dau": { "type": "string", "format": "date-time" },
+              "thoi_gian_ket_thuc": { "type": ["string", "null"], "format": "date-time" },
+              "ky_su_kien": { "type": "array", "items": { "type": "object" } },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "war_id", "guild_id_attacker", "guild_id_defender", "trang_thai", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "indexes": [
+            { "fields": { "war_id": 1 }, "unique": true },
+            { "fields": { "guild_id_attacker": 1 } },
+            { "fields": { "guild_id_defender": 1 } },
+            { "fields": { "trang_thai": 1 } }
+          ]
+        },
+        {
+          "_id": "auction_house",
+          "title": "Nhà đấu giá",
+          "primary_key": "listing_id",
+          "merge_strategy": { "on": "listing_id", "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Auction House",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "listing_id": { "type": "string", "format": "uuid" },
+              "item_id": { "type": "string" },
+              "ten_item": { "type": "string" },
+              "do_hiem": { "type": "string", "enum": ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"] },
+              "nguoi_ban_uid": { "type": "string", "format": "uuid" },
+              "gia_khoi_diem": { "type": "integer", "minimum": 1 },
+              "gia_hien_tai": { "type": "integer", "minimum": 0 },
+              "gia_mua_ngay": { "type": ["integer", "null"] },
+              "nguoi_dau_gia_uid": { "type": ["string", "null"] },
+              "trang_thai": { "type": "string", "enum": ["Đang đấu giá", "Đã bán", "Hết hạn", "Đã hủy"] },
+              "thoi_gian_ket_thuc": { "type": "string", "format": "date-time" },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "listing_id", "item_id", "ten_item", "nguoi_ban_uid", "gia_khoi_diem", "trang_thai", "thoi_gian_ket_thuc", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "indexes": [
+            { "fields": { "listing_id": 1 }, "unique": true },
+            { "fields": { "item_id": 1, "trang_thai": 1 } },
+            { "fields": { "do_hiem": 1 } },
+            { "fields": { "thoi_gian_ket_thuc": 1 } },
+            { "fields": { "nguoi_ban_uid": 1 } }
+          ]
+        },
+        {
+          "_id": "leaderboard_snapshot",
+          "title": "Leaderboard Snapshot",
+          "primary_key": ["character_uid", "ky_xep_hang", "loai_bang_xep_hang"],
+          "merge_strategy": { "on": ["character_uid", "ky_xep_hang", "loai_bang_xep_hang"], "whenMatched": "merge", "whenNotMatched": "insert" },
+          "jsonSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Leaderboard Snapshot",
+            "type": "object",
+            "properties": {
+              "_id": { "type": "string" },
+              "character_uid": { "type": "string", "format": "uuid" },
+              "ten_nhan_vat": { "type": "string" },
+              "guild_id": { "type": ["string", "null"] },
+              "class": { "type": "string" },
+              "cap_do": { "type": "integer" },
+              "combat_rating": { "type": "integer" },
+              "pvp_rating": { "type": "integer" },
+              "tong_sat_thuong_gay_ra": { "type": "integer" },
+              "tong_boss_tiet_diet": { "type": "integer" },
+              "tong_pvp_thang": { "type": "integer" },
+              "diem_xep_hang": { "type": "number" },
+              "thu_hang": { "type": "integer", "minimum": 1 },
+              "loai_bang_xep_hang": { "type": "string", "enum": ["Server", "Guild", "Class", "PvP", "PvE"] },
+              "ky_xep_hang": { "type": "string", "description": "VD: 2026-04, 2026-W18" },
+              "ai_predicted_rank_next": { "type": ["integer", "null"] },
+              "ai_churn_risk": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["_id", "character_uid", "loai_bang_xep_hang", "ky_xep_hang", "thu_hang", "createdAt", "updatedAt"],
+            "additionalProperties": false
+          },
+          "indexes": [
+            { "fields": { "ky_xep_hang": -1, "loai_bang_xep_hang": 1, "thu_hang": 1 } },
+            { "fields": { "character_uid": 1 } },
+            { "fields": { "guild_id": 1 } }
+          ]
+        },
+        {
+          "_id": "ai_model_metadata",
+          "title": "AI Model Metadata",
+          "primary_key": ["model_name", "model_version"],
+          "merge_strategy": { "on": ["model_name", "model_version"], "whenMatched": "merge", "whenNotMatched": "insert" },
+          "indexes": [
+            { "fields": { "model_name": 1, "model_version": 1 }, "unique": true },
+            { "fields": { "model_type": 1 } },
+            { "fields": { "trang_thai": 1 } }
+          ]
+        }
+      ],
+      "aggregation_pipelines": [
+        {
+          "name": "getServerStats",
+          "collection": "nhan_vat",
+          "description": "Tổng quan server: tổng nhân vật, đang online, phân phối theo class/race, PvP rating TB.",
+          "pipeline": [
+            {
+              "$group": {
+                "_id": null,
+                "tongNhanVat": { "$sum": 1 },
+                "dangOnline": { "$sum": { "$cond": [{ "$eq": ["$trang_thai", "Online"] }, 1, 0] } },
+                "tongGioiDianh": { "$sum": "$tong_thoi_gian_choi_giay" },
+                "avgCap": { "$avg": "$cap_do" },
+                "avgPvpRating": { "$avg": "$pvp_rating" },
+                "tongGold": { "$sum": "$gold" },
+                "nhanVatCapMax": {
+                  "$sum": { "$cond": [{ "$gte": ["$cap_do", 100] }, 1, 0] }
+                }
+              }
+            },
+            {
+              "$addFields": {
+                "avgGioiDianhPerPlayer": { "$divide": ["$tongGioiDianh", { "$max": ["$tongNhanVat", 1] }] },
+                "tyLeOnline": {
+                  "$multiply": [{ "$divide": ["$dangOnline", { "$max": ["$tongNhanVat", 1] }] }, 100]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "getClassDistribution",
+          "collection": "nhan_vat",
+          "description": "Phân phối nhân vật theo class và race, kèm avg combat rating.",
+          "pipeline": [
+            {
+              "$group": {
+                "_id": { "class": "$class", "race": "$race" },
+                "soLuong": { "$sum": 1 },
+                "avgCombatRating": { "$avg": "$chi_so.combat_rating" },
+                "avgCap": { "$avg": "$cap_do" },
+                "avgPvpRating": { "$avg": "$pvp_rating" }
+              }
+            },
+            { "$sort": { "soLuong": -1 } }
+          ]
+        },
+        {
+          "name": "getBossRaidStats",
+          "collection": "boss_raid",
+          "description": "Thống kê boss raid: tổng raid, tỉ lệ tiêu diệt, thời gian TB tiêu diệt, boss khó nhất.",
+          "runtime_vars": { "__NOW__": "new Date()" },
+          "pipeline": [
+            {
+              "$group": {
+                "_id": "$boss_id",
+                "tenBoss": { "$first": "$ten_boss" },
+                "tongRaid": { "$sum": 1 },
+                "daBiTietDiet": {
+                  "$sum": { "$cond": [{ "$eq": ["$trang_thai", "Đã bị tiêu diệt"] }, 1, 0] }
+                },
+                "avgHpConLai": { "$avg": "$hp_hien_tai" },
+                "avgNguoiRaid": { "$avg": { "$size": "$danh_sach_nguoi_raid" } }
+              }
+            },
+            {
+              "$addFields": {
+                "tyLeTietDiet": {
+                  "$multiply": [{ "$divide": ["$daBiTietDiet", { "$max": ["$tongRaid", 1] }] }, 100]
+                }
+              }
+            },
+            { "$sort": { "tyLeTietDiet": 1 } }
+          ]
+        },
+        {
+          "name": "getQuestCompletionStats",
+          "collection": "quest_log",
+          "description": "Thống kê quest: tỉ lệ hoàn thành theo loại và độ khó.",
+          "pipeline": [
+            {
+              "$group": {
+                "_id": { "loai_quest": "$loai_quest", "do_kho": "$do_kho" },
+                "tongQuest": { "$sum": 1 },
+                "hoanThanh": { "$sum": { "$cond": [{ "$eq": ["$trang_thai", "Hoàn thành"] }, 1, 0] } },
+                "thatBai": { "$sum": { "$cond": [{ "$eq": ["$trang_thai", "Thất bại"] }, 1, 0] } },
+                "avgThoiGianHoanThanh": {
+                  "$avg": {
+                    "$cond": [
+                      { "$and": [{ "$ne": ["$thoi_gian_nhan", null] }, { "$ne": ["$thoi_gian_hoan_thanh", null] }] },
+                      { "$subtract": ["$thoi_gian_hoan_thanh", "$thoi_gian_nhan"] },
+                      null
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$addFields": {
+                "tyLeHoanThanh": {
+                  "$multiply": [{ "$divide": ["$hoanThanh", { "$max": ["$tongQuest", 1] }] }, 100]
+                }
+              }
+            },
+            { "$sort": { "_id.do_kho": 1 } }
+          ]
+        },
+        {
+          "name": "getTopPlayersDPS",
+          "collection": "combat_log",
+          "description": "Xếp hạng DPS theo nhân vật trong khoảng thời gian, lọc theo zone hoặc raid.",
+          "runtime_vars": { "__FROM__": "new Date(Date.now() - 7*24*3600*1000)", "__ZONE_FILTER__": "optional" },
+          "pipelineTemplate": [
+            { "$match": { "attacker_type": "Player", "timestamp": { "$gte": "__FROM__" } } },
+            {
+              "$group": {
+                "_id": "$attacker_uid",
+                "tongSatThuong": { "$sum": "$sat_thuong" },
+                "tongDanhTay": { "$sum": 1 },
+                "soCrit": { "$sum": { "$cond": ["$co_gay_crit", 1, 0] } },
+                "avgSatThuongMoiDanh": { "$avg": "$sat_thuong" },
+                "satThuongCaoNhat": { "$max": "$sat_thuong" }
+              }
+            },
+            {
+              "$addFields": {
+                "tyLeCrit": {
+                  "$multiply": [{ "$divide": ["$soCrit", { "$max": ["$tongDanhTay", 1] }] }, 100]
+                }
+              }
+            },
+            { "$sort": { "tongSatThuong": -1 } },
+            { "$limit": 100 }
+          ]
+        },
+        {
+          "name": "getGuildLeaderboard",
+          "collection": "guild",
+          "description": "Bảng xếp hạng guild: điểm, số thành viên, trạng thái chiến tranh.",
+          "pipeline": [
+            { "$match": { "trang_thai": { "$ne": "Disbanded" } } },
+            { "$sort": { "diem_guild": -1 } },
+            { "$limit": 50 },
+            {
+              "$project": {
+                "guild_id": 1, "ten_guild": 1, "cap_guild": 1,
+                "so_thanh_vien": 1, "diem_guild": 1,
+                "thu_hang_server": 1, "trang_thai": 1
+              }
+            }
+          ]
+        },
+        {
+          "name": "getEconomyReport",
+          "collection": "auction_house",
+          "description": "Báo cáo kinh tế: giá trung bình theo độ hiếm, tổng giao dịch, item được đấu giá nhiều nhất.",
+          "runtime_vars": { "__FROM__": "new Date(Date.now() - 30*24*3600*1000)" },
+          "pipeline": [
+            { "$match": { "trang_thai": "Đã bán", "updatedAt": { "$gte": "__FROM__" } } },
+            {
+              "$group": {
+                "_id": { "do_hiem": "$do_hiem", "item_id": "$item_id" },
+                "tenItem": { "$first": "$ten_item" },
+                "soGiaoDich": { "$sum": 1 },
+                "avgGia": { "$avg": "$gia_hien_tai" },
+                "giaMax": { "$max": "$gia_hien_tai" },
+                "giaMin": { "$min": "$gia_hien_tai" },
+                "tongGiaTriGiaoDich": { "$sum": "$gia_hien_tai" }
+              }
+            },
+            { "$sort": { "soGiaoDich": -1 } },
+            { "$limit": 200 }
+          ]
+        }
+      ]
+    },
+
+    "deep_learning": {
+      "_meta": {
+        "description": "Module AI/Deep Learning cho MMORPG: dự đoán churn, phát hiện cheat, drop rate optimization, NPC dialogue, combat balance.",
+        "collections_used": ["ai_model_metadata", "nhan_vat", "combat_log", "leaderboard_snapshot", "quest_log", "auction_house"]
+      },
+      "models": [
+        {
+          "model_id": "lstm-churn-predictor",
+          "model_type": "LSTM",
+          "use_case": "player-churn-prediction",
+          "description": "Dự đoán khả năng người chơi bỏ game trong 7 ngày tới dựa trên hành vi chơi.",
+          "training": {
+            "data_source_collection": "nhan_vat",
+            "feature_fields": [
+              "cap_do", "tong_thoi_gian_choi_giay", "pvp_rating",
+              "chi_so.combat_rating", "gold", "guild_id",
+              "lan_dang_nhap_cuoi", "trang_thai"
+            ],
+            "label": "churn_within_7_days",
+            "label_derivation": "trang_thai = Offline AND (NOW - lan_dang_nhap_cuoi) > 7 days",
+            "sequence_length": 30,
+            "train_split": 0.75,
+            "val_split": 0.15,
+            "test_split": 0.10,
+            "batch_size": 64,
+            "epochs": 50,
+            "learning_rate": 1e-3,
+            "optimizer": "Adam",
+            "loss_function": "BinaryCrossEntropy",
+            "early_stopping_patience": 5,
+            "hardware": { "device": "cuda", "fp16": true }
+          },
+          "inference": {
+            "schedule": "0 3 * * *",
+            "output_field": "ai_churn_risk",
+            "write_to_collection": "leaderboard_snapshot",
+            "threshold_alert": 0.75,
+            "alert_action": "trigger game_bot retention_offer",
+            "max_inference_latency_ms": 1000
+          },
+          "metadata_sync": {
+            "collection": "ai_model_metadata",
+            "update_fields": ["accuracy", "f1_score", "last_trained", "model_uri", "trang_thai"]
+          }
+        },
+        {
+          "model_id": "cnn-anticheat-detector",
+          "model_type": "CNN",
+          "use_case": "speed-hack-and-teleport-detection",
+          "description": "Phát hiện cheat: speed hack, teleport, damage hack từ combat_log và player movement.",
+          "training": {
+            "data_source_collection": "combat_log",
+            "feature_fields": [
+              "sat_thuong", "co_gay_crit", "he_so_crit",
+              "ky_nang_su_dung", "timestamp", "zone_id"
+            ],
+            "supplementary_source": "player.movement Kafka topic (position delta per tick)",
+            "label": "is_cheating",
+            "label_derivation": "manual review flags + heuristic rules (damage > 3 sigma, position delta > max_speed)",
+            "input_shape": [50, 10],
+            "filters": [64, 128, 256],
+            "kernel_size": 3,
+            "train_split": 0.80,
+            "val_split": 0.10,
+            "test_split": 0.10,
+            "batch_size": 128,
+            "epochs": 40,
+            "learning_rate": 5e-4,
+            "optimizer": "Adam",
+            "loss_function": "BinaryCrossEntropy",
+            "hardware": { "device": "cuda", "fp16": true }
+          },
+          "inference": {
+            "trigger": "real-time stream từ combat.event topic",
+            "latency_target_ms": 20,
+            "action_on_detect": {
+              "confidence_gte_0_99": "auto_ban + write audit_log",
+              "confidence_0_85_to_0_99": "flag_for_review + throttle_player",
+              "confidence_lt_0_85": "log_only"
+            },
+            "write_flag_to": "nhan_vat.trang_thai = Banned (nếu auto_ban)"
+          },
+          "metadata_sync": {
+            "collection": "ai_model_metadata",
+            "update_fields": ["accuracy", "f1_score", "last_trained", "model_uri", "trang_thai"]
+          }
+        },
+        {
+          "model_id": "rl-drop-rate-optimizer",
+          "model_type": "Reinforcement Learning (PPO)",
+          "use_case": "loot-drop-rate-optimization",
+          "description": "Tự động cân bằng tỉ lệ drop item để duy trì nền kinh tế game lành mạnh.",
+          "training": {
+            "environment": "Game Economy Simulator",
+            "state_space": [
+              "avg_item_price_per_rarity", "total_items_in_market",
+              "active_players_count", "boss_kill_rate_per_hour",
+              "inflation_index"
+            ],
+            "action_space": "adjust drop_rate_percent for each item × rarity combination (±0.5%)",
+            "reward_function": "maximize player_satisfaction_score WHILE minimize economy_inflation",
+            "data_source_collection": "auction_house",
+            "episodes": 10000,
+            "learning_rate": 3e-4,
+            "gamma": 0.99,
+            "clip_epsilon": 0.2,
+            "hardware": { "device": "cuda", "fp16": false }
+          },
+          "inference": {
+            "schedule": "0 0 * * 1",
+            "output": "updated loot_table.ty_le_drop_percent in boss_raid",
+            "max_adjustment_per_week_percent": 2.0,
+            "human_review_required": true
+          },
+          "metadata_sync": {
+            "collection": "ai_model_metadata",
+            "update_fields": ["accuracy", "last_trained", "model_uri", "trang_thai"]
+          }
+        },
+        {
+          "model_id": "bert-npc-dialogue",
+          "model_type": "BERT",
+          "use_case": "npc-contextual-dialogue-generation",
+          "description": "NPC sinh hội thoại phù hợp ngữ cảnh: quest, lore, trade, guide dựa trên trạng thái người chơi.",
+          "training": {
+            "data_source_description": "Curated NPC dialogue scripts (50k samples) + player query logs from game_bot.dialogue_bot",
+            "input": "player_intent + character_state + npc_personality_profile",
+            "output": "contextual dialogue response (max 200 tokens)",
+            "base_model": "bert-base-multilingual-cased",
+            "fine_tuning_strategy": "LoRA",
+            "lora_rank": 16,
+            "train_split": 0.85,
+            "val_split": 0.10,
+            "test_split": 0.05,
+            "batch_size": 16,
+            "epochs": 5,
+            "learning_rate": 2e-5,
+            "optimizer": "AdamW",
+            "hardware": { "device": "cuda", "fp16": true, "gradient_checkpointing": true }
+          },
+          "inference": {
+            "trigger": "game_bot.npc_bot.dialogue_bot intent resolved",
+            "max_inference_latency_ms": 150,
+            "fallback": "template-based response if latency > 300ms"
+          },
+          "metadata_sync": {
+            "collection": "ai_model_metadata",
+            "update_fields": ["accuracy", "f1_score", "last_trained", "model_uri", "trang_thai"]
+          }
+        },
+        {
+          "model_id": "gnn-combat-balance-analyzer",
+          "model_type": "Graph Neural Network",
+          "use_case": "class-balance-analysis",
+          "description": "Phân tích cân bằng class PvP: phát hiện class OP/UP bằng cách model hóa matchup graph.",
+          "training": {
+            "data_source_collection": "combat_log",
+            "graph_nodes": "nhan_vat (filtered: attacker_type=Player AND defender_type=Player)",
+            "graph_edges": "combat events (attacker → defender, weight = win/loss)",
+            "feature_per_node": ["class", "cap_do", "pvp_rating", "chi_so.combat_rating"],
+            "label": "win_rate_per_class_matchup",
+            "batch_size": 32,
+            "epochs": 30,
+            "learning_rate": 1e-3,
+            "hardware": { "device": "cuda", "fp16": false }
+          },
+          "inference": {
+            "schedule": "0 0 * * 0",
+            "output": "class_balance_report: win_rate matrix, outlier_classes, suggested_stat_adjustments",
+            "write_to": "ai_model_metadata (report URI on IPFS)",
+            "alert_if_win_rate_deviation_exceeds_percent": 15
+          },
+          "metadata_sync": {
+            "collection": "ai_model_metadata",
+            "update_fields": ["accuracy", "last_trained", "model_uri", "trang_thai"]
+          }
+        }
+      ],
+      "mlops": {
+        "experiment_tracking": "MLflow",
+        "model_registry": "MLflow Model Registry",
+        "artifact_storage": "S3 + IPFS mirror",
+        "artifact_uri_pattern": "s3://aetherworld-models/{model_id}/v{version}/weights.pt",
+        "ci_pipeline": {
+          "trigger_on": "new training data exceeds 10000 combat logs OR weekly cron",
+          "steps": ["data_validation", "feature_engineering", "training", "evaluation", "a_b_test_in_staging", "conditional_promotion"]
+        },
+        "monitoring": {
+          "drift_detection": true,
+          "alert_on_accuracy_drop_below": 0.88,
+          "retrain_trigger": "f1_score < 0.85 OR data_drift_score > 0.20",
+          "churn_model_alert_false_positive_rate_max": 0.05
+        }
+      },
+      "gpu_config": {
+        "provider": "on-premise GPU cluster",
+        "gpu_type": "NVIDIA A100 80GB",
+        "num_gpus": 4,
+        "multi_gpu": true,
+        "mixed_precision": true
+      }
+    }
+  },
+
+  "cross_module_flows": [
+    {
+      "name": "boss_kill_reward_flow",
+      "description": "Boss bị tiêu diệt → Streaming → Phân phối loot & EXP → Cập nhật leaderboard → Badge & World Announcement",
+      "steps": [
+        { "step": 1, "action": "boss_raid.hp_hien_tai reaches 0, trang_thai = 'Đã bị tiêu diệt'", "module": "mongodb_backend" },
+        { "step": 2, "action": "emit to boss.health_tick topic (hp=0)", "module": "streaming" },
+        { "step": 3, "action": "phase_transition_trigger stops boss AI loop", "module": "game_bot" },
+        { "step": 4, "action": "raid_dps_calculator ranks danh_sach_nguoi_raid by sat_thuong_gay_ra", "module": "streaming" },
+        { "step": 5, "action": "exp_reward_distributor writes EXP + gold to nhan_vat", "module": "streaming" },
+        { "step": 6, "action": "loot_drop_distributor rolls loot_table, writes to combat_log.loot_drop", "module": "mongodb_backend" },
+        { "step": 7, "action": "emit to loot.drop topic if do_hiem >= Epic", "module": "streaming" },
+        { "step": 8, "action": "rare_drop_world_announcer pushes to world.broadcast channel", "module": "streaming" },
+        { "step": 9, "action": "achievement_engine checks boss_first_kill badge", "module": "game_bot" },
+        { "step": 10, "action": "leaderboard snapshot updated for all raid participants", "module": "mongodb_backend" },
+        { "step": 11, "action": "boss respawn scheduled via boss_ai.respawn_schedule", "module": "game_bot" }
+      ]
+    },
+    {
+      "name": "pvp_churn_retention_flow",
+      "description": "AI phát hiện người chơi có nguy cơ bỏ game → Bot gửi offer giữ chân → Theo dõi phản hồi",
+      "steps": [
+        { "step": 1, "action": "lstm-churn-predictor chạy daily, tính ai_churn_risk per player", "module": "deep_learning" },
+        { "step": 2, "action": "write ai_churn_risk to leaderboard_snapshot", "module": "mongodb_backend" },
+        { "step": 3, "action": "ai_churn_risk >= 0.75: emit retention event to player.{uid}.notifications", "module": "streaming" },
+        { "step": 4, "action": "game_bot NPC sends personalized retention dialogue via bert-npc-dialogue", "module": "game_bot" },
+        { "step": 5, "action": "offer: EXP buff 50% / rare item gift / guild invitation", "module": "game_bot" },
+        { "step": 6, "action": "track nhan_vat.lan_dang_nhap_cuoi change; update churn label for retraining", "module": "deep_learning" }
+      ]
+    },
+    {
+      "name": "anticheat_realtime_flow",
+      "description": "Combat event → CNN phân tích real-time → Auto-ban hoặc flag review",
+      "steps": [
+        { "step": 1, "action": "combat_log insert triggers emit to combat.event topic", "module": "streaming" },
+        { "step": 2, "action": "anti_cheat_detector consumer batches events per player (window=1s)", "module": "streaming" },
+        { "step": 3, "action": "cnn-anticheat-detector runs inference on batched feature window", "module": "deep_learning" },
+        { "step": 4, "action": "confidence >= 0.99: update nhan_vat.trang_thai = Banned", "module": "mongodb_backend" },
+        { "step": 5, "action": "push ban notification to player.{uid}.notifications and zone broadcast", "module": "streaming" },
+        { "step": 6, "action": "write audit entry to audit_log with model confidence score", "module": "mongodb_backend" },
+        { "step": 7, "action": "confidence 0.85-0.99: flag to GM review queue, apply soft-throttle", "module": "game_bot" }
+      ]
+    },
+    {
+      "name": "guild_war_scoring_flow",
+      "description": "Guild war event → Streaming cập nhật điểm → Leaderboard → Phân phối reward khi kết thúc",
+      "steps": [
+        { "step": 1, "action": "combat event trong guild_war zone recorded to combat_log", "module": "mongodb_backend" },
+        { "step": 2, "action": "emit to guild.war_event topic", "module": "streaming" },
+        { "step": 3, "action": "guild_leaderboard_updater increments diem_tan_cong / diem_phong_thu", "module": "streaming" },
+        { "step": 4, "action": "push live score to guild.{guild_id}.chat websocket channel", "module": "streaming" },
+        { "step": 5, "action": "war_timeline_recorder appends event to guild_war.ky_su_kien", "module": "mongodb_backend" },
+        { "step": 6, "action": "war ends: guild_thang determined, achievement badge distributed", "module": "game_bot" },
+        { "step": 7, "action": "guild.diem_guild updated, thu_hang_server recalculated", "module": "mongodb_backend" },
+        { "step": 8, "action": "world.broadcast: announce war result", "module": "streaming" }
+      ]
+    },
+    {
+      "name": "economy_balance_flow",
+      "description": "Auction activity → Economy monitor → RL drop-rate optimizer → Boss loot table update",
+      "steps": [
+        { "step": 1, "action": "auction_house insert/update emits to economy.auction_bid topic", "module": "streaming" },
+        { "step": 2, "action": "auction_price_tracker aggregates avg price per rarity per 1h window", "module": "streaming" },
+        { "step": 3, "action": "economy_inflation_monitor computes inflation_index", "module": "streaming" },
+        { "step": 4, "action": "weekly: rl-drop-rate-optimizer runs inference with current economy state", "module": "deep_learning" },
+        { "step": 5, "action": "proposed loot_table adjustments sent to GM dashboard for human review", "module": "game_bot" },
+        { "step": 6, "action": "GM approves → update boss_raid.loot_table.ty_le_drop_percent", "module": "mongodb_backend" },
+        { "step": 7, "action": "class-balance-analyzer runs weekly, reports to game designer dashboard", "module": "deep_learning" }
+      ]
+    }
+  ],
+
+  "security": {
+    "auth": {
+      "primary": "JWT (RS256) + GameSessionToken",
+      "session_ttl_seconds": 7200,
+      "rate_limit": { "login_attempts_per_minute": 5, "api_calls_per_second_per_player": 100 }
+    },
+    "anti_exploit": {
+      "server_authoritative": true,
+      "client_prediction": true,
+      "server_reconciliation": true,
+      "note": "All damage, movement, loot calculations validated server-side. Client is display-only."
+    },
+    "audit": {
+      "collection": "audit_logs",
+      "track_actions": ["BAN", "UNBAN", "GM_ITEM_GRANT", "DROP_RATE_CHANGE", "WAR_OVERRIDE", "PLAYER_REPORT"],
+      "retention_days": 730
+    }
+  },
+
+  "observability": {
+    "metrics": {
+      "provider": "Prometheus + Grafana",
+      "dashboards": [
+        "concurrent_players_live",
+        "combat_events_per_second",
+        "kafka_topic_lag",
+        "ml_inference_latency",
+        "mongodb_ops_per_second",
+        "economy_inflation_index",
+        "churn_risk_distribution",
+        "anticheat_ban_rate"
+      ]
+    },
+    "logging": {
+      "provider": "ELK Stack",
+      "log_level": "INFO",
+      "structured": true,
+      "game_server_logs_retention_days": 30
+    },
+    "alerting": {
+      "channels": ["Discord (GM)", "PagerDuty (on-call)", "Slack"],
+      "rules": [
+        { "name": "concurrent_players_drop_50pct", "threshold_percent": 50, "window_minutes": 5, "severity": "critical" },
+        { "name": "kafka_lag_high", "threshold_ms": 100, "topic": "combat.event", "severity": "warning" },
+        { "name": "anticheat_ban_spike", "threshold_count": 50, "window_minutes": 10, "severity": "critical" },
+        { "name": "boss_health_stuck", "condition": "boss.health_tick lag > 500ms for active boss", "severity": "warning" },
+        { "name": "economy_inflation_critical", "inflation_index_threshold": 2.5, "severity": "critical" },
+        { "name": "ml_churn_model_drift", "f1_drop_threshold": 0.85, "severity": "warning" }
+      ]
+    }
+  }
+}
