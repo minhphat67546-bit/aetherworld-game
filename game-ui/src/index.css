@@ -160,6 +160,18 @@ h1, h2, h3, .title-font {
   100% { transform: translateY(0px); }
 }
 
+@keyframes bossIdle {
+  0% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-5px) scale(1.02); }
+  100% { transform: translateY(0px) scale(1); }
+}
+
+@keyframes playerBob {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+  100% { transform: translateY(0px); }
+}
+
 /* Dashboard Grid (Combat Zone) */
 .dashboard-grid {
   display: grid;
