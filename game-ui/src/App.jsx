@@ -10,10 +10,10 @@ const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], autoConnec
 
 // Asset mapping
 const ZONE_ASSETS = {
-  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/boss_treant.png',   color: '#2d6a4f' },
-  volcano: { bg: '/assets/zone_volcano.png',  boss: '/assets/boss_kaelthas.png', color: '#ef476f' },
-  ocean:   { bg: '/assets/zone_ocean.png',    boss: '/assets/boss_kraken.png',   color: '#0077b6' },
-  tower:   { bg: '/assets/zone_tower.png',    boss: '/assets/boss_lich.png',     color: '#9d4edd' },
+  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/boss_treant.png',   color: '#2d6a4f', vfx: '/assets/vfx_forest.png' },
+  volcano: { bg: '/assets/zone_volcano.png',  boss: '/assets/boss_kaelthas.png', color: '#ef476f', vfx: '/assets/vfx_volcano.png' },
+  ocean:   { bg: '/assets/zone_ocean.png',    boss: '/assets/boss_kraken.png',   color: '#0077b6', vfx: '/assets/vfx_ocean.png' },
+  tower:   { bg: '/assets/zone_tower.png',    boss: '/assets/boss_lich.png',     color: '#9d4edd', vfx: '/assets/vfx_tower.png' },
 };
 
 const PLAYER_IMG = '/assets/player.png';
@@ -125,6 +125,7 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
         position: 'relative', overflow: 'hidden',
         boxShadow: `0 0 30px ${assets.color}40`,
         margin: '0 auto',
+        animation: bossAttackingAnim ? 'vfxScreenShake 0.4s ease-in-out' : 'none',
       }}>
         {/* Dark overlay for readability */}
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1 }}></div>
@@ -142,9 +143,17 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
             width: '100%', height: '100%', objectFit: 'contain',
             filter: 'drop-shadow(0 0 15px rgba(255,0,0,0.6))',
           }} />
-          <div style={{ position: 'absolute', top: -45, left: '50%', transform: 'translateX(-50%)', color: 'white', fontSize: '10px', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.5)', padding: '2px 4px', borderRadius: '4px' }}>
-            [Debug] X: {Math.round(bossPos?.x || 650)} | Y: {Math.round(bossPos?.y || 120)}
-          </div>
+          {/* VFX Spell Effect - appears on attack */}
+          {bossAttackingAnim && assets.vfx && (
+            <img src={assets.vfx} alt="VFX" style={{
+              position: 'absolute', top: '-60%', left: '-60%',
+              width: '220%', height: '220%', objectFit: 'contain',
+              pointerEvents: 'none', zIndex: 10,
+              animation: 'vfxBurst 0.6s ease-out forwards',
+              mixBlendMode: 'screen',
+              opacity: 0.9,
+            }} />
+          )}
           {/* Boss HP bar above boss */}
           {bossHp > 0 && (
             <div style={{ position: 'absolute', top: -25, left: '50%', transform: 'translateX(-50%)', width: '80%' }}>
@@ -470,7 +479,7 @@ export default function App() {
     });
     socket.on('boss_attack_anim', () => {
       setBossAttackingAnim(true);
-      setTimeout(() => setBossAttackingAnim(false), 500);
+      setTimeout(() => setBossAttackingAnim(false), 800);
     });
     socket.on('player_dodged', (data) => {
       addLog(`✨ BẠN ĐÃ NÉ THÀNH CÔNG đòn tấn công của ${data.bossName}!`, 'player');
