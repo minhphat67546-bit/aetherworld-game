@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { Shield, Sword, Skull, Activity, ArrowLeft, Users, User, Home, Wifi, WifiOff, Globe, Lock, LogIn, LogOut, Package } from 'lucide-react';
+import { Shield, Sword, Skull, Activity, ArrowLeft, Users, User, Home, Wifi, WifiOff, Globe, Lock, LogIn, LogOut, Package, Check, X } from 'lucide-react';
+import PartyFrame from './components/PartyFrame';
+import TradeWindow from './components/TradeWindow';
 
 const SOCKET_URL = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
@@ -10,10 +12,10 @@ const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], autoConnec
 
 // Asset mapping
 const ZONE_ASSETS = {
-  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/boss_treant.png',   color: '#2d6a4f', vfx: '/assets/vfx_forest.png' },
-  volcano: { bg: '/assets/zone_volcano.png',  boss: '/assets/boss_kaelthas.png', color: '#ef476f', vfx: '/assets/vfx_volcano.png' },
-  ocean:   { bg: '/assets/zone_ocean.png',    boss: '/assets/boss_kraken.png',   color: '#0077b6', vfx: '/assets/vfx_ocean.png' },
-  tower:   { bg: '/assets/zone_tower.png',    boss: '/assets/boss_lich.png',     color: '#9d4edd', vfx: '/assets/vfx_tower.png' },
+  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/boss_treant.png',   color: '#2d6a4f' },
+  volcano: { bg: '/assets/zone_volcano.png',  boss: '/assets/boss_kaelthas.png', color: '#ef476f' },
+  ocean:   { bg: '/assets/zone_ocean.png',    boss: '/assets/boss_kraken.png',   color: '#0077b6' },
+  tower:   { bg: '/assets/zone_tower.png',    boss: '/assets/boss_lich.png',     color: '#9d4edd' },
 };
 
 const PLAYER_IMG = '/assets/player.png';
@@ -125,7 +127,6 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
         position: 'relative', overflow: 'hidden',
         boxShadow: `0 0 30px ${assets.color}40`,
         margin: '0 auto',
-        animation: bossAttackingAnim ? 'vfxScreenShake 0.4s ease-in-out' : 'none',
       }}>
         {/* Dark overlay for readability */}
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1 }}></div>
@@ -143,17 +144,9 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
             width: '100%', height: '100%', objectFit: 'contain',
             filter: 'drop-shadow(0 0 15px rgba(255,0,0,0.6))',
           }} />
-          {/* VFX Spell Effect - appears on attack */}
-          {bossAttackingAnim && assets.vfx && (
-            <img src={assets.vfx} alt="VFX" style={{
-              position: 'absolute', top: '-60%', left: '-60%',
-              width: '220%', height: '220%', objectFit: 'contain',
-              pointerEvents: 'none', zIndex: 10,
-              animation: 'vfxBurst 0.6s ease-out forwards',
-              mixBlendMode: 'screen',
-              opacity: 0.9,
-            }} />
-          )}
+          <div style={{ position: 'absolute', top: -45, left: '50%', transform: 'translateX(-50%)', color: 'white', fontSize: '10px', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.5)', padding: '2px 4px', borderRadius: '4px' }}>
+            [Debug] X: {Math.round(bossPos?.x || 650)} | Y: {Math.round(bossPos?.y || 120)}
+          </div>
           {/* Boss HP bar above boss */}
           {bossHp > 0 && (
             <div style={{ position: 'absolute', top: -25, left: '50%', transform: 'translateX(-50%)', width: '80%' }}>
@@ -413,6 +406,12 @@ export default function App() {
   const [bossPos, setBossPos] = useState({ x: 650, y: 120 });
   const [bossAttackingAnim, setBossAttackingAnim] = useState(false);
 
+  const [partyState, setPartyState] = useState(null);
+  const [partyInvite, setPartyInvite] = useState(null);
+  const [tradeState, setTradeState] = useState(null);
+  const [tradeRequest, setTradeRequest] = useState(null);
+
+
   const addLog = useCallback((text, type = 'system') => {
     setCombatLogs(prev => [{ id: Date.now() + Math.random(), text, type }, ...prev].slice(0, 50));
   }, []);
@@ -479,7 +478,7 @@ export default function App() {
     });
     socket.on('boss_attack_anim', () => {
       setBossAttackingAnim(true);
-      setTimeout(() => setBossAttackingAnim(false), 800);
+      setTimeout(() => setBossAttackingAnim(false), 500);
     });
     socket.on('player_dodged', (data) => {
       addLog(`✨ BẠN ĐÃ NÉ THÀNH CÔNG đòn tấn công của ${data.bossName}!`, 'player');
@@ -537,6 +536,57 @@ export default function App() {
       setOtherPlayers(prev => prev[data.name] ? { ...prev, [data.name]: { ...prev[data.name], hp: 0, isDead: true } } : prev);
       addLog(`☠️ ${data.name} đã bị tiêu diệt!`, 'boss');
     });
+    
+    socket.on('party_invite_received', (data) => setPartyInvite(data));
+    socket.on('party_update', (data) => setPartyState(data));
+    
+    socket.on('trade_request_received', (data) => setTradeRequest(data));
+    socket.on('trade_started', (data) => {
+      setTradeRequest(null);
+      setTradeState({
+        tradeId: data.tradeId,
+        partnerName: data.partner,
+        myItems: [], myGold: 0, myReady: false,
+        partnerItems: [], partnerGold: 0, partnerReady: false
+      });
+    });
+    socket.on('trade_updated', (data) => {
+      setTradeState(prev => prev ? { ...prev, partnerItems: data.partnerItems, partnerGold: data.partnerGold, myReady: false, partnerReady: false } : prev);
+    });
+    socket.on('trade_updated_self', (data) => {
+      setTradeState(prev => prev ? { ...prev, myItems: data.myItems, myGold: data.myGold, myReady: false, partnerReady: false } : prev);
+    });
+    socket.on('trade_partner_ready', () => {
+      setTradeState(prev => prev ? { ...prev, partnerReady: true } : prev);
+    });
+    socket.on('trade_self_ready', () => {
+      setTradeState(prev => prev ? { ...prev, myReady: true } : prev);
+    });
+    socket.on('trade_cancelled', () => {
+      setTradeState(null);
+      addLog('Giao dịch đã bị hủy.', 'system');
+    });
+    socket.on('trade_success', () => {
+      setTradeState(null);
+      addLog('Giao dịch thành công! Kiểm tra lại túi đồ.', 'system');
+      socket.emit('get_inventory'); 
+    });
+    socket.on('inventory_data', (data) => {
+      setCharacter(prev => prev ? { ...prev, inventory: data.inventory, equipment: data.equipment, gold: data.gold } : prev);
+    });
+    socket.on('pvp_attack_result', (data) => {
+      const isMe = data.attacker === character?.name || data.target === character?.name;
+      addLog(`[${data.attacker}] tấn công [${data.target}] gây ${data.damage} ST ${data.isCrit ? '(Chí mạng)' : ''}`, 'boss');
+      if (data.target === character?.name) {
+         setCharacter(prev => prev ? { ...prev, hp: data.targetHp } : prev);
+      } else {
+         setOtherPlayers(prev => prev[data.target] ? { ...prev, [data.target]: { ...prev[data.target], hp: data.targetHp } } : prev);
+      }
+    });
+    socket.on('force_move_zone', (zoneId) => {
+       enterZone(zoneId);
+    });
+
     socket.on('player_respawned_in_zone', (data) => {
       setOtherPlayers(prev => prev[data.name] ? { ...prev, [data.name]: { ...prev[data.name], hp: data.hp, hpMax: data.hpMax, x: data.x, y: data.y, isDead: false } } : prev);
       addLog(`✨ ${data.name} đã hồi sinh!`, 'guild');
@@ -741,6 +791,46 @@ export default function App() {
               );
             })}
           </div>
+        </>
+      )}
+
+      
+      {/* OVERLAYS */}
+      {view === 'combat' && activeZone && (
+        <>
+          <PartyFrame socket={socket} character={character} playersInZone={playersInZone} partyState={partyState} />
+          
+          {tradeState && (
+            <TradeWindow socket={socket} tradeState={tradeState} character={character} onClose={() => setTradeState(null)} />
+          )}
+
+          {partyInvite && (
+            <div style={{
+              position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 300,
+              background: 'rgba(15,10,25,0.95)', border: '1px solid #9d4edd', borderRadius: '8px',
+              padding: '15px', boxShadow: '0 0 20px rgba(157,78,221,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center'
+            }}>
+              <p style={{ color: '#fff', marginBottom: '10px' }}><b style={{ color: '#e0aaff' }}>{partyInvite.from}</b> mời bạn vào Tổ Đội</p>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => { socket.emit('party_accept', partyInvite.fromId); setPartyInvite(null); }} style={{ background: '#06d6a0', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Chấp nhận</button>
+                <button onClick={() => setPartyInvite(null)} style={{ background: '#ef476f', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', color: 'white', fontWeight: 'bold' }}>Từ chối</button>
+              </div>
+            </div>
+          )}
+
+          {tradeRequest && (
+            <div style={{
+              position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 300,
+              background: 'rgba(15,10,25,0.95)', border: '1px solid #ffd166', borderRadius: '8px',
+              padding: '15px', boxShadow: '0 0 20px rgba(255,209,102,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center'
+            }}>
+              <p style={{ color: '#fff', marginBottom: '10px' }}><b style={{ color: '#ffd166' }}>{tradeRequest.from}</b> muốn giao dịch với bạn</p>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => { socket.emit('trade_accept', tradeRequest.fromId); setTradeRequest(null); }} style={{ background: '#06d6a0', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Đồng ý</button>
+                <button onClick={() => setTradeRequest(null)} style={{ background: '#ef476f', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', color: 'white', fontWeight: 'bold' }}>Từ chối</button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

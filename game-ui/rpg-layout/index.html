@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="AetherWorld — 2D Web RPG Game" />
+  <title>AetherWorld — RPG 2D</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet" />
+
+  <!-- Socket.io Client -->
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ============================== -->
+  <!--        LOGIN / REGISTER        -->
+  <!-- ============================== -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-card glass-panel">
+      <div class="auth-card__logo">⚔️</div>
+      <h1 class="auth-card__title">AetherWorld</h1>
+      <p class="auth-card__subtitle" id="auth-subtitle">Đăng nhập để lưu tiến trình</p>
+
+      <form id="auth-form" class="auth-form" autocomplete="off">
+        <div class="form-group">
+          <label for="auth-username">👤 Tên tài khoản</label>
+          <input type="text" id="auth-username" placeholder="Nhập tên tài khoản..." required minlength="3" />
+        </div>
+        <div class="form-group">
+          <label for="auth-password">🔒 Mật khẩu</label>
+          <input type="password" id="auth-password" placeholder="Nhập mật khẩu..." required minlength="4" />
+        </div>
+        <p class="auth-error" id="auth-error"></p>
+        <button type="submit" class="btn-action btn-auth" id="auth-submit-btn">
+          <span id="auth-btn-text">ĐĂNG NHẬP</span>
+        </button>
+      </form>
+
+      <div class="auth-toggle">
+        <button id="auth-toggle-btn" class="btn-link">Chưa có tài khoản? Đăng ký ngay</button>
+      </div>
+
+      <div class="auth-divider"><span>HOẶC</span></div>
+
+      <button id="guest-btn" class="btn-action btn-guest">
+        🌐 CHƠI KHÁCH (không lưu dữ liệu)
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================== -->
+  <!--        LOADING SCREEN          -->
+  <!-- ============================== -->
+  <div id="loading-screen" class="loading-screen" style="display:none;">
+    <div class="loading-card glass-panel">
+      <h1 class="loading-card__title">AetherWorld</h1>
+      <p class="loading-card__text" id="loading-text">Đang kết nối tới máy chủ...</p>
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!-- ============================== -->
+  <!--       GAME LAYOUT SHELL        -->
+  <!-- ============================== -->
+  <div id="game-shell" class="game-shell" style="display:none;">
+
+    <!-- ======== LEFT SIDEBAR ======== -->
+    <aside id="left-sidebar" class="sidebar sidebar--left glass-panel">
+      <div class="sidebar__logo">
+        <div class="sidebar__logo-icon">⚔️</div>
+        <span class="sidebar__logo-text">Aether</span>
+      </div>
+
+      <nav class="sidebar__nav" aria-label="Main navigation">
+        <button id="nav-world" class="nav-btn nav-btn--active" data-panel="world" data-tooltip="Thế giới">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <span class="nav-btn__label">World</span>
+        </button>
+
+        <button id="nav-stats" class="nav-btn" data-panel="stats" data-tooltip="Chỉ số">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/>
+          </svg>
+          <span class="nav-btn__label">Stats</span>
+        </button>
+
+        <button id="nav-shop" class="nav-btn" data-panel="shop" data-tooltip="Cửa hàng">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>
+          </svg>
+          <span class="nav-btn__label">Shop</span>
+        </button>
+
+        <button id="nav-guilds" class="nav-btn" data-panel="guilds" data-tooltip="Bang hội">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span class="nav-btn__label">Guilds</span>
+        </button>
+
+        <button id="nav-craft" class="nav-btn" data-panel="craft" data-tooltip="Chế tạo">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+          <span class="nav-btn__label">Craft</span>
+        </button>
+
+        <button id="nav-npc" class="nav-btn" data-panel="npc" data-tooltip="Trò chuyện NPC">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="nav-btn__label">Chat</span>
+        </button>
+
+        <div class="sidebar__spacer"></div>
+
+        <button id="nav-settings" class="nav-btn" data-panel="settings" data-tooltip="Cài đặt">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span class="nav-btn__label">Settings</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- ======== CENTER VIEWPORT ======== -->
+    <main id="center-viewport" class="viewport">
+      <!-- Top Bar -->
+      <div class="viewport__topbar">
+        <div class="viewport__zone-name">
+          <span class="viewport__zone-icon">🌍</span>
+          <span id="zone-title">Thế Giới AetherWorld</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button id="exit-zone-btn" class="btn-action" style="display:none; padding: 6px 12px; font-size: 0.75rem; border-radius: 6px; background: rgba(239,71,111,0.2); border: 1px solid rgba(239,71,111,0.5); color: #fff;">🚪 Thoát Zone</button>
+          <div class="viewport__status">
+            <span class="status-dot status-dot--online" id="status-dot"></span>
+            <span id="online-count">0 Online</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Canvas -->
+      <div class="viewport__canvas-wrapper">
+        <canvas id="gameCanvas">Trình duyệt không hỗ trợ Canvas.</canvas>
+
+        <!-- Overlay panels (Stats, Shop, etc.) — shown over canvas -->
+        <div id="overlay-panel" class="overlay-panel" style="display:none;">
+          <div class="overlay-panel__content glass-panel" id="overlay-content">
+            <!-- Dynamic content injected by JS -->
+          </div>
+        </div>
+
+        <!-- Combat Log (bottom-left in canvas) -->
+        <div class="combat-log-container" id="combat-log-container" style="display:none;">
+          <div class="combat-log" id="combat-log"></div>
+        </div>
+
+        <!-- Death Overlay -->
+        <div id="death-overlay" class="death-overlay" style="display:none;">
+          <div class="death-overlay__icon">💀</div>
+          <h2 class="death-overlay__title">BẠN ĐÃ BỊ TIÊU DIỆT</h2>
+          <p class="death-overlay__timer">Hồi sinh sau <span id="death-timer">5</span> giây...</p>
+        </div>
+
+        <!-- Loot Drop Overlay -->
+        <div id="loot-overlay" class="loot-overlay" style="display:none;">
+          <div class="loot-card glass-panel">
+            <h3 class="loot-card__title">🎁 VẬT PHẨM RƠI</h3>
+            <div id="loot-items" class="loot-card__items"></div>
+            <div class="loot-card__gold" id="loot-gold">💰 +0 Vàng</div>
+            <button id="loot-collect-btn" class="btn-action btn-loot">NHẬN TẤT CẢ</button>
+          </div>
+        </div>
+
+        <!-- Boss HP Bar (top of canvas when in combat) -->
+        <div id="boss-hud" class="boss-hud" style="display:none;">
+          <div class="boss-hud__info">
+            <span class="boss-hud__name" id="boss-name">Boss</span>
+            <span class="boss-hud__hp-text" id="boss-hp-text">0 / 0</span>
+          </div>
+          <div class="boss-hud__bar">
+            <div class="boss-hud__fill" id="boss-hp-fill" style="width:100%"></div>
+          </div>
+        </div>
+
+        <!-- Controls hint -->
+        <div class="controls-hint" id="controls-hint" style="display:none;">
+          <div class="controls-hint__keys">
+            <span></span><span class="key">W</span><span></span>
+            <span class="key">A</span><span class="key">S</span><span class="key">D</span>
+          </div>
+          <div class="controls-hint__label">Di chuyển · SPACE tấn công</div>
+        </div>
+      </div>
+
+      <!-- Skill Bar (bottom) -->
+      <div class="viewport__hud" id="skill-bar-hud" style="display:none;">
+        <div class="skill-bar">
+          <button class="skill-slot" id="skill-1" data-key="1"><span class="skill-slot__icon">⚔️</span><span class="skill-slot__key">1</span></button>
+          <button class="skill-slot" id="skill-2" data-key="2"><span class="skill-slot__icon">🔥</span><span class="skill-slot__key">2</span></button>
+          <button class="skill-slot" id="skill-3" data-key="3"><span class="skill-slot__icon">🛡️</span><span class="skill-slot__key">3</span></button>
+          <button class="skill-slot" id="skill-4" data-key="4"><span class="skill-slot__icon">✨</span><span class="skill-slot__key">4</span></button>
+          <button class="skill-slot skill-slot--ultimate" id="skill-ult" data-key="R"><span class="skill-slot__icon">💀</span><span class="skill-slot__key">R</span></button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ======== RIGHT PANEL ======== -->
+    <aside id="right-panel" class="sidebar sidebar--right glass-panel">
+      <!-- Player Info -->
+      <div class="player-info">
+        <div class="player-info__avatar" id="player-avatar">
+          <div class="player-info__avatar-placeholder">⚔️</div>
+          <div class="player-info__level" id="player-level">Lv 1</div>
+        </div>
+        <div class="player-info__details">
+          <h2 class="player-info__name" id="player-name">Loading...</h2>
+          <span class="player-info__class" id="player-class">Warrior</span>
+          <span class="player-info__race" id="player-race">Human</span>
+        </div>
+        <button id="logout-btn" class="btn-logout" title="Đăng xuất">🚪</button>
+      </div>
+
+      <!-- Stat Bars -->
+      <div class="stat-bars">
+        <div class="stat-bar">
+          <div class="stat-bar__header">
+            <span class="stat-bar__label stat-bar__label--hp">❤️ HP</span>
+            <span class="stat-bar__value" id="hp-value">0 / 0</span>
+          </div>
+          <div class="stat-bar__track">
+            <div class="stat-bar__fill stat-bar__fill--hp" id="hp-fill" style="width:100%"></div>
+          </div>
+        </div>
+        <div class="stat-bar">
+          <div class="stat-bar__header">
+            <span class="stat-bar__label stat-bar__label--mp">💧 MP</span>
+            <span class="stat-bar__value" id="mp-value">12,000 / 12,000</span>
+          </div>
+          <div class="stat-bar__track">
+            <div class="stat-bar__fill stat-bar__fill--mp" id="mp-fill" style="width:100%"></div>
+          </div>
+        </div>
+        <div class="stat-bar">
+          <div class="stat-bar__header">
+            <span class="stat-bar__label stat-bar__label--exp">⭐ EXP</span>
+            <span class="stat-bar__value" id="exp-value">0 / 10,000</span>
+          </div>
+          <div class="stat-bar__track">
+            <div class="stat-bar__fill stat-bar__fill--exp" id="exp-fill" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-divider"></div>
+
+      <!-- Mini Stats -->
+      <div class="mini-stats" id="mini-stats">
+        <div class="mini-stat"><span class="mini-stat__label">⚔️ Boss Kills</span><span class="mini-stat__value" id="stat-kills">0</span></div>
+        <div class="mini-stat"><span class="mini-stat__label">⚡ Combat Rating</span><span class="mini-stat__value" id="stat-cr">0</span></div>
+      </div>
+
+      <div class="panel-divider"></div>
+
+      <!-- Equipment -->
+      <div class="equipment-section">
+        <h3 class="section-title">🛡️ Trang Bị</h3>
+        <div class="equipment-grid">
+          <div class="equip-slot" id="equip-weapon" data-slot="weapon"><div class="equip-slot__icon">⚔️</div><div class="equip-slot__label">Vũ khí</div></div>
+          <div class="equip-slot" id="equip-armor" data-slot="armor"><div class="equip-slot__icon">🛡️</div><div class="equip-slot__label">Giáp</div></div>
+          <div class="equip-slot" id="equip-helmet" data-slot="helmet"><div class="equip-slot__icon">⛑️</div><div class="equip-slot__label">Mũ</div></div>
+          <div class="equip-slot" id="equip-accessory" data-slot="accessory"><div class="equip-slot__icon">💍</div><div class="equip-slot__label">Phụ kiện</div></div>
+        </div>
+      </div>
+
+      <div class="panel-divider"></div>
+
+      <!-- Inventory -->
+      <div class="inventory-section">
+        <h3 class="section-title">📦 Túi Đồ <span class="inventory-count" id="inv-count">0 / 24</span></h3>
+        <div class="inventory-grid" id="inventory-grid"></div>
+      </div>
+
+      <!-- Gold -->
+      <div class="gold-display" id="gold-display">
+        <span class="gold-display__icon">💰</span>
+        <span class="gold-display__amount" id="gold-amount">0</span>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast" style="display:none;">
+    <span id="toast-msg"></span>
+  </div>
+
+  <script src="engine.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
