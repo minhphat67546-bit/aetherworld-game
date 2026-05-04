@@ -1,5 +1,5 @@
 const { players, getBossState, resetGuildBoss, getPlayersInZone } = require('../state/gameState');
-const { getPlayerStats } = require('../services/gameService');
+const { getPlayerStats, randomInt } = require('../services/gameService');
 const { CRAFTING_RECIPES, ITEM_EFFECTS, EQUIPMENT_STATS, LOOT_TABLES } = require('../data/equipment');
 const { ZONES, RACES } = require('../data/gameData');
 

@@ -89,6 +89,7 @@
   socket.on('init', data => {
     state.character = data.player; state.zones = data.zones;
     updatePlayerUI();
+    buildInventoryGrid();
     $('online-count').textContent = data.onlineCount + ' Online';
     const hasToken = localStorage.getItem('aether_token');
     if (state.view === 'loading' || (state.view === 'auth' && hasToken && data.player.isLoggedIn)) {
@@ -101,7 +102,7 @@
 
   // Zone entered
   socket.on('zone_entered', data => {
-    state.activeZone = data.zone; state.bossHp = data.bossHp; state.bossHpMax = data.zone.boss.hpMax;
+    state.activeZone = data.zone; state.bossHp = data.bossHp; state.bossHpMax = data.zone.boss ? data.zone.boss.hpMax : 1;
     state.combatLogs = [{ text:`Bạn đã tiến vào ${data.zone.name}`, type:'system' }];
     state.character.hp = data.player.hp; state.character.hpMax = data.player.hpMax;
 
@@ -111,7 +112,7 @@
 
     GameEngine.setZone(data.zoneId);
     GameEngine.setPlayerPos(data.player.x||150, data.player.y||300);
-    GameEngine.setBoss(data.bossX||650, data.bossY||120, data.bossHp, data.zone.boss.hpMax);
+    if (data.zone.boss) GameEngine.setBoss(data.bossX||650, data.bossY||120, data.bossHp, data.zone.boss.hpMax);
     GameEngine.setOtherPlayers(state.otherPlayers);
     GameEngine.setPlayerInfo(state.character.name, state.character.hp, state.character.hpMax);
 
@@ -411,6 +412,14 @@
     setTimeout(() => { $('loot-overlay').style.display = 'none'; }, 12000);
   }
   $('loot-collect-btn').addEventListener('click', () => { $('loot-overlay').style.display = 'none'; });
+  $('loot-exit-btn').addEventListener('click', () => {
+    $('loot-overlay').style.display = 'none';
+    if (state.activeZone) {
+      exitZone();
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('nav-btn--active'));
+      $('nav-world').classList.add('nav-btn--active');
+    }
+  });
 
   // ====== OVERLAY PANELS (Stats, Shop, Guilds, Craft, Settings) ======
   function closeOverlayPanel() { $('overlay-panel').style.display = 'none'; state.currentPanel = null; }

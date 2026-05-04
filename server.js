@@ -238,7 +238,7 @@ io.on('connection', async (socket) => {
       },
       zones: Object.values(ZONES).map(z => ({
         id: z.id, name: z.name, type: z.type,
-        boss: { name: z.boss.name, level: z.boss.level, hpMax: z.boss.hpMax, difficulty: z.boss.difficulty }
+        boss: z.boss ? { name: z.boss.name, level: z.boss.level, hpMax: z.boss.hpMax, difficulty: z.boss.difficulty } : null
       })),
       onlineCount: players.size
     });
@@ -439,6 +439,7 @@ app.get('/{*splat}', (req, res) => {
 });
 
 // ====== START ======
+startGameLoop(io);
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🎮 AetherWorld Server đang chạy thành công ở cổng ${PORT}!`);

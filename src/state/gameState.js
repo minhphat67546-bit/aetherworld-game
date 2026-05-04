@@ -26,7 +26,7 @@ function getBossState(socketId, zoneId) {
   } else {
     const key = `${socketId}:${zoneId}`;
     if (!soloBossState[key]) {
-      soloBossState[key] = { hp: zone.boss.hpMax, status: 'Đang hoạt động', x: 650, y: 120, lastAttack: Date.now() };
+      soloBossState[key] = zone.boss ? { hp: zone.boss.hpMax, status: 'Đang hoạt động', x: 650, y: 120, lastAttack: Date.now() } : { hp: 0, status: 'Không có Boss' };
     }
     return soloBossState[key];
   }
