@@ -32,6 +32,22 @@ const LOOT_TABLES = {
     { name: 'Gậy Linh Hồn', rarity: 'rare', icon: '🪄', type: 'Vũ khí' },
     { name: 'Áo Bào Lich Vương', rarity: 'epic', icon: '🧙', type: 'Giáp' },
     { name: 'Phylactery Vĩnh Cửu', rarity: 'legendary', icon: '💀', type: 'Huyền thoại' },
+  ],
+  forest_mob: [
+    { name: 'Lá Cây Hắc Ám', rarity: 'common', icon: '🍃', type: 'Nguyên liệu' },
+    { name: 'Rìu Rễ Cây Ma', rarity: 'rare', icon: '🪓', type: 'Vũ khí' },
+  ],
+  volcano_mob: [
+    { name: 'Mảnh Obsidian', rarity: 'common', icon: 'ite', type: 'Nguyên liệu' },
+    { name: 'Kiếm Nham Thạch', rarity: 'rare', icon: '⚔️', type: 'Vũ khí' },
+  ],
+  ocean_mob: [
+    { name: 'Vảy Kraken', rarity: 'common', icon: '🐚', type: 'Nguyên liệu' },
+    { name: 'Đinh Ba Thủy Triều', rarity: 'rare', icon: '🔱', type: 'Vũ khí' },
+  ],
+  tower_mob: [
+    { name: 'Bụi Ma Thuật', rarity: 'common', icon: '✨', type: 'Nguyên liệu' },
+    { name: 'Gậy Linh Hồn', rarity: 'rare', icon: '🪄', type: 'Vũ khí' },
   ]
 };
 

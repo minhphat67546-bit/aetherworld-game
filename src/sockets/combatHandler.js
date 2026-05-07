@@ -1,27 +1,31 @@
-const { ZONES } = require('../data/gameData');
-const { players, getBossState, resetGuildBoss, getPlayersInZone, parties } = require('../state/gameState');
+const { ZONES, SKILLS_DB, ROLE_STATS } = require('../data/gameData');
+const { players, getBossState, resetGuildBoss, getPlayersInZone, parties, roomMobs } = require('../state/gameState');
 const { getPlayerStats, generateLoot, randomInt } = require('../services/gameService');
 
 function registerCombatHandlers(io, socket) {
-  // ---- ATTACK BOSS ----
-  socket.on('attack', () => {
-    const player = players.get(socket.id);
+  const handleBossAttack = (socketId, dmgMulti = 1.0) => {
+    const player = players.get(socketId);
     if (!player || !player.currentZone || player.isDead) return;
 
     const zoneId = player.currentZone;
     const zone = ZONES[zoneId];
-    if (!zone) return;
+    if (!zone || !zone.boss) return;
 
-    const bossState = getBossState(socket.id, zoneId);
+    const bossState = getBossState(socketId, zoneId);
     if (!bossState || bossState.hp <= 0) return;
 
     const stats = getPlayerStats(player);
-    // Damage calc
+    
+    // Total raw damage
     const isCrit = Math.random() > 0.65;
-    const minDmg = Math.floor(stats.attack * 0.9);
-    const maxDmg = Math.floor(stats.attack * 1.1);
+    const minDmg = Math.floor(stats.attack * 0.9 * dmgMulti);
+    const maxDmg = Math.floor(stats.attack * 1.1 * dmgMulti);
     const baseDmg = randomInt(minDmg, maxDmg);
-    const finalDmg = isCrit ? Math.floor(baseDmg * 2.1) : baseDmg;
+    const totalRawDamage = isCrit ? Math.floor(baseDmg * 2.1) : baseDmg;
+
+    // Apply armor formula: Damage = Raw * (100 / (100 + Armor))
+    const bossArmor = zone.boss.armor || 40;
+    const finalDmg = Math.floor(totalRawDamage * (100 / (100 + bossArmor)));
 
     bossState.hp = Math.max(0, bossState.hp - finalDmg);
     if (bossState.hp <= 0) bossState.status = 'Đã bị tiêu diệt';
@@ -38,7 +42,7 @@ function registerCombatHandlers(io, socket) {
 
     if (zone.type === 'guild') {
       // Broadcast to entire zone
-      io.to(`zone:${zoneId}`).emit('attack_result', attackResult);
+      io.to(player.roomName).emit('attack_result', attackResult);
       if (bossState.hp <= 0) {
         const loot = generateLoot(zoneId);
         
@@ -47,7 +51,7 @@ function registerCombatHandlers(io, socket) {
            loot.items.push({ name: 'Thẻ Đổi Tộc', rarity: 'legendary', icon: '🎭', type: 'Đặc biệt', rarityLabel: '🟧 Legendary', color: '#ff9f1c' });
         }
 
-        io.to(`zone:${zoneId}`).emit('boss_killed', {
+        io.to(player.roomName).emit('boss_killed', {
           killerName: player.name,
           bossName: zone.boss.name,
           zoneId,
@@ -69,7 +73,7 @@ function registerCombatHandlers(io, socket) {
         // Respawn boss after 15 seconds
         setTimeout(() => {
           resetGuildBoss(zoneId);
-          io.to(`zone:${zoneId}`).emit('boss_respawned', {
+          io.to(player.roomName).emit('boss_respawned', {
             bossName: zone.boss.name,
             bossHp: zone.boss.hpMax,
             zoneId
@@ -121,6 +125,130 @@ function registerCombatHandlers(io, socket) {
         }
       }
     }
+  };
+
+  // ---- USE SKILL ----
+  socket.on('use_skill', (data) => {
+    const { skillKey } = data;
+    const player = players.get(socket.id);
+    if (!player || player.isDead) return;
+
+    const skillMap = SKILLS_DB[player.race] || SKILLS_DB['Human'];
+    const skill = skillMap[skillKey];
+    
+    if (skill) {
+      // Lazy Evaluation
+      const now = Date.now();
+      if (!player.lastRegenTime) player.lastRegenTime = now;
+      const dt = (now - player.lastRegenTime) / 1000;
+      player.lastRegenTime = now;
+      
+      if (player.mp < player.mpMax) {
+          player.mp = Math.min(player.mpMax, player.mp + (player.mpMax * 0.01 * dt));
+      }
+
+      // Server Authoritative MP Check
+      if (player.mp < skill.manaCost) {
+          socket.emit('sys_msg', { msg: "Lỗi đồng bộ: Không đủ Năng lượng!" });
+          socket.emit('sync_mana', { mp: player.mp, mpMax: player.mpMax });
+          return;
+      }
+      player.mp -= skill.manaCost;
+      socket.emit('sync_mana', { mp: player.mp, mpMax: player.mpMax });
+
+      if (skill.type === 'attack' || skill.type === 'ultimate' || skill.type === 'aoe') {
+         handleBossAttack(socket.id, skill.dmgMulti || 1.0);
+      } else {
+         socket.emit('sys_msg', { msg: `Đã dùng: ${skill.name}` });
+      }
+    }
+  });
+
+  // ---- ATTACK BOSS ----
+  socket.on('attack', () => {
+      const player = players.get(socket.id);
+      if (!player) return;
+      
+      const now = Date.now();
+      if (player.lastBasicAttack && now - player.lastBasicAttack < 1000) return;
+      player.lastBasicAttack = now;
+
+      const roleStats = ROLE_STATS[player.race] || ROLE_STATS['Human'];
+      handleBossAttack(socket.id, roleStats.basicAttackMulti || 1.0);
+  });
+
+  // ---- ATTACK MOB ----
+  socket.on('attack_mob', (mobId) => {
+      const player = players.get(socket.id);
+      if (!player || !player.currentZone || player.isDead || !player.roomName) return;
+
+      const mobs = roomMobs[player.roomName];
+      if (!mobs) return;
+
+      const mob = mobs.find(m => m.id === mobId);
+      if (!mob || mob.isDead) return;
+
+      const now = Date.now();
+      if (player.lastBasicAttack && now - player.lastBasicAttack < 1000) return;
+      player.lastBasicAttack = now;
+
+      const roleStats = ROLE_STATS[player.race] || ROLE_STATS['Human'];
+
+      const dx = player.x - mob.x;
+      const dy = player.y - mob.y;
+      const attackRange = roleStats.attackRange || 150;
+      if (Math.sqrt(dx*dx + dy*dy) > attackRange) return socket.emit('sys_msg', { msg: 'Mục tiêu quá xa!' });
+
+      const stats = getPlayerStats(player);
+      const isCrit = Math.random() > 0.65;
+      const dmgMulti = roleStats.basicAttackMulti || 1.0;
+      
+      const minDmg = Math.floor(stats.attack * 0.9 * dmgMulti);
+      const maxDmg = Math.floor(stats.attack * 1.1 * dmgMulti);
+      const baseDmg = randomInt(minDmg, maxDmg);
+      const finalDmg = isCrit ? Math.floor(baseDmg * 2.1) : baseDmg;
+
+      mob.hp = Math.max(0, mob.hp - finalDmg);
+
+      io.to(player.roomName).emit('mob_attack_result', {
+          attackerName: player.name,
+          mobId: mob.id,
+          damage: finalDmg,
+          isCrit,
+          mobHp: mob.hp
+      });
+
+      if (mob.hp <= 0) {
+          mob.isDead = true;
+          
+          // Generate loot
+          const loot = generateLoot(mob.dropTable);
+          // Scale down loot for mobs
+          loot.gold = Math.floor(loot.gold * 0.1); // 10% gold compared to boss
+          // 80% chance to drop nothing but gold
+          if (Math.random() < 0.8) loot.items = [];
+
+          player.level += 1; // Or add XP system later. For now, 1 kill = 1 level to match old logic, but let's just do gold & items.
+          player.gold = (player.gold || 0) + loot.gold;
+          player.inventory = [...(player.inventory || []), ...loot.items.map(i => ({ name: i.name, rarity: i.rarity, icon: i.icon, type: i.type }))];
+          player.isDirty = true;
+
+          socket.emit('mob_killed', {
+              mobId: mob.id,
+              mobName: mob.name,
+              loot,
+              newLevel: player.level
+          });
+          
+          // Remove dead mob after a short delay
+          setTimeout(() => {
+             const roomMobsArr = roomMobs[player.roomName];
+             if (roomMobsArr) {
+                 const idx = roomMobsArr.findIndex(m => m.id === mob.id);
+                 if (idx !== -1) roomMobsArr.splice(idx, 1);
+             }
+          }, 1000);
+      }
   });
 
   // ---- PVP SYSTEM ----
@@ -156,7 +284,7 @@ function registerCombatHandlers(io, socket) {
     targetPlayer.hp -= finalDmg;
     targetPlayer.isDirty = true;
     
-    io.to(`zone:${player.currentZone}`).emit('pvp_attack_result', {
+    io.to(player.roomName).emit('pvp_attack_result', {
       attacker: player.name,
       target: targetPlayer.name,
       damage: finalDmg,
@@ -167,7 +295,7 @@ function registerCombatHandlers(io, socket) {
     if (targetPlayer.hp <= 0) {
       targetPlayer.isDead = true;
       targetPlayer.hp = 0;
-      io.to(`zone:${player.currentZone}`).emit('sys_msg', { msg: `${player.name} đã hạ gục ${targetPlayer.name}!` });
+      io.to(player.roomName).emit('sys_msg', { msg: `${player.name} đã hạ gục ${targetPlayer.name}!` });
       
       setTimeout(() => {
         if (players.has(targetSocketId)) {

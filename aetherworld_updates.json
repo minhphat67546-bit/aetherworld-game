@@ -1,0 +1,26 @@
+{
+  "project": "AetherWorld MMORPG",
+  "version": "1.0.1",
+  "update_date": "2026-05-04",
+  "changes": {
+    "combat_system": {
+      "damage_formula": "Sát thương thực tế = Sát thương cơ bản * Hệ số kỹ năng * (100 / (100 + Giáp Boss))",
+      "basic_attack_scaling": "Hệ số sát thương đánh thường được phân hóa rõ rệt theo Role (Dwarf: 1.0, Dark Elf: 0.8, Human: 0.6, Orc: 0.5, Light Elf: 0.2).",
+      "basic_attack_cooldown": "Thêm thời gian chờ (cooldown) 1.5 giây cho đòn đánh thường trên UI và chặn độ trễ 1.0 giây ở Backend để chống Auto-click.",
+      "floating_combat_text": "Thêm hiệu ứng hiển thị sát thương bay lên trên Canvas (Chữ trắng/vàng khi đánh Boss, chữ đỏ khi bị Boss đánh trúng)."
+    },
+    "mana_system": {
+      "mp_consumption": "Kỹ năng tiêu hao Mana được trừ và xác thực trực tiếp trên Backend.",
+      "mp_regeneration": "Hệ thống tự động hồi phục (Regen) Mana định kỳ 1% mỗi giây (cần 100 giây để đầy bình) tạo chiều sâu chiến thuật.",
+      "ui_sync": "Đồng bộ hóa UI thanh Mana liên tục thông qua Socket.IO."
+    },
+    "boss_ai": {
+      "berserk_mode": "Trí tuệ nhân tạo (AI) kích hoạt trạng thái Cơn Thịnh Nộ khi Boss còn dưới 25% máu. Tốc độ tấn công tăng từ 2.5s/đòn lên 1.0s/đòn.",
+      "special_skills": "Khi trong trạng thái Berserk, Boss có 30% tỷ lệ sử dụng tuyệt chiêu Thiên Thạch Rơi (Meteor Rain) gây sát thương gấp 3 lần và tạo hiệu ứng rung màn hình."
+    },
+    "ai_integration": {
+      "reinforcement_learning": "Tích hợp tài liệu thiết kế môi trường mô phỏng (Gymnasium) và thuật toán PPO bằng Ray RLlib để tự động tối ưu hóa chỉ số Boss.",
+      "etl_pipeline": "Phát triển luồng ETL bằng Python (PyMongo, Pandas) để làm sạch dữ liệu lịch sử đấu Boss và xuất ra định dạng Parquet làm đầu vào cho Machine Learning."
+    }
+  }
+}

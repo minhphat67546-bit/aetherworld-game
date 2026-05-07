@@ -9,7 +9,7 @@ const { MongoClient, ObjectId } = require('mongodb');
 const { GoogleGenAI } = require('@google/genai');
 require('dotenv').config();
 
-const { players, soloBossState, parties, counters, activeTrades, resetGuildBoss, getBossState, getPlayersInZone } = require('./src/state/gameState');
+const { players, soloBossState, parties, counters, activeTrades, roomMobs, resetGuildBoss, initRoomMobs, getBossState, getPlayersInZone } = require('./src/state/gameState');
 const { getPlayerStats, generateLoot, randomInt } = require('./src/services/gameService');
 const { startGameLoop } = require('./src/game/gameLoop');
 const registerCombatHandlers = require('./src/sockets/combatHandler');
@@ -135,7 +135,7 @@ async function connectDB() {
 connectDB();
 
 // ====== GAME STATE & DATA ======
-const { NAMES_POOL, CLASSES, RACES, ZONES } = require('./src/data/gameData');
+const { NAMES_POOL, CLASSES, RACES, ZONES, ROLE_STATS, SKILLS_DB } = require('./src/data/gameData');
 
 // ====== LOOT TABLES & EQUIPMENT ======
 const { RARITY, RARITY_COLORS, LOOT_TABLES, CRAFTING_RECIPES, ITEM_EFFECTS, EQUIPMENT_STATS } = require('./src/data/equipment');
@@ -198,10 +198,26 @@ io.on('connection', async (socket) => {
 
     let playerData;
     if (charData) {
+      // Check for existing session and kick them (Standard MMORPG behavior)
+      for (const [existingSocketId, existingPlayer] of players.entries()) {
+        if (existingPlayer.userId === userId) {
+           const oldSocket = io.sockets.sockets.get(existingSocketId);
+           if (oldSocket) {
+             oldSocket.emit('kicked', { msg: 'Tài khoản đã được đăng nhập từ một nơi khác. Bạn bị ngắt kết nối.' });
+             oldSocket.disconnect(true);
+           }
+           players.delete(existingSocketId);
+           console.log(`[!] Kicked old session for user ${charData.name} (${userId})`);
+           break;
+        }
+      }
+
       // Logged-in player with saved data
+      const roleStats = ROLE_STATS[charData.race] || ROLE_STATS['Human'];
       playerData = {
         name: charData.name, class: charData.class, race: charData.race,
         level: charData.level, hp: charData.hpMax, hpMax: charData.hpMax,
+        mp: roleStats.mp, mpMax: roleStats.mp,
         combatRating: charData.combatRating,
         gold: charData.gold || 0, inventory: charData.inventory || [],
         equipment: charData.equipment || {},
@@ -212,10 +228,14 @@ io.on('connection', async (socket) => {
     } else {
       // Guest player
       const playerName = NAMES_POOL[randomInt(0, NAMES_POOL.length - 1)] + '_' + randomInt(10, 99);
+      const rIndex = randomInt(0, RACES.length - 1);
+      const roleStats = ROLE_STATS[RACES[rIndex]];
       playerData = {
-        name: playerName, class: CLASSES[randomInt(0, CLASSES.length - 1)],
-        race: RACES[randomInt(0, RACES.length - 1)], level: 1,
-        hp: 48000, hpMax: 48000, combatRating: randomInt(8000, 15000),
+        name: playerName, class: CLASSES[rIndex],
+        race: RACES[rIndex], level: 1,
+        hp: roleStats.hp, hpMax: roleStats.hp,
+        mp: roleStats.mp, mpMax: roleStats.mp,
+        combatRating: randomInt(8000, 15000),
         gold: 0, inventory: [], equipment: {}, bossKills: 0,
         userId: null, currentZone: null, x: 150, y: 300, isDead: false
       };
@@ -230,6 +250,7 @@ io.on('connection', async (socket) => {
       player: {
         name: playerData.name, class: playerData.class, race: playerData.race,
         level: playerData.level, hp: playerData.hp, hpMax: playerData.hpMax,
+        mp: playerData.mp, mpMax: playerData.mpMax,
         combatRating: playerData.combatRating,
         gold: playerData.gold, inventory: playerData.inventory,
         equipment: playerData.equipment,
@@ -240,10 +261,18 @@ io.on('connection', async (socket) => {
         id: z.id, name: z.name, type: z.type,
         boss: z.boss ? { name: z.boss.name, level: z.boss.level, hpMax: z.boss.hpMax, difficulty: z.boss.difficulty } : null
       })),
+      skills: SKILLS_DB[playerData.race] || SKILLS_DB['Human'],
       onlineCount: players.size
     });
     io.emit('online_count', players.size);
   });
+
+  function getRoomName(player, socketId, zoneId) {
+    const zone = ZONES[zoneId];
+    if (zone && (zone.type === 'guild' || zone.type === 'city')) return `zone:${zoneId}`;
+    if (player.partyId) return `zone:${zoneId}:${player.partyId}`;
+    return `zone:${zoneId}:${socketId}`;
+  }
 
   // ---- ENTER ZONE ----
   socket.on('enter_zone', (zoneId) => {
@@ -255,9 +284,10 @@ io.on('connection', async (socket) => {
 
     // Leave previous zone room
     if (player.currentZone) {
-      socket.leave(`zone:${player.currentZone}`);
-      if (ZONES[player.currentZone]?.type === 'guild') {
-        io.to(`zone:${player.currentZone}`).emit('player_left_zone', {
+      if (player.roomName) socket.leave(player.roomName);
+      const prevZoneType = ZONES[player.currentZone]?.type;
+      if (prevZoneType === 'guild' || prevZoneType === 'city' || player.partyId) {
+        io.to(player.roomName).emit('player_left_zone', {
           name: player.name, zoneId: player.currentZone,
           playersInZone: getPlayersInZone(player.currentZone).length
         });
@@ -265,10 +295,13 @@ io.on('connection', async (socket) => {
     }
 
     player.currentZone = zoneId;
+    player.roomName = getRoomName(player, socket.id, zoneId);
     player.hp = player.hpMax; // heal on zone entry
     player.x = 100 + randomInt(0, 200);
     player.y = 250 + randomInt(0, 150);
-    socket.join(`zone:${zoneId}`);
+    socket.join(player.roomName);
+    
+    initRoomMobs(player.roomName, zoneId);
 
     const bossState = getBossState(socket.id, zoneId);
 
@@ -279,12 +312,15 @@ io.on('connection', async (socket) => {
 
     const freshBoss = getBossState(socket.id, zoneId);
 
-    // Build other players list with positions (guild zones only)
+    // Build other players list with positions
     const otherPlayers = [];
-    if (zone.type === 'guild') {
+    if (zone.type === 'guild' || zone.type === 'city' || player.partyId) {
       getPlayersInZone(zoneId).forEach(p => {
         if (p.socketId !== socket.id) {
-          otherPlayers.push({ name: p.name, class: p.class, level: p.level, x: p.x, y: p.y, hp: p.hp, hpMax: p.hpMax });
+           const pRoom = getRoomName(p, p.socketId, zoneId);
+           if (pRoom === player.roomName) {
+              otherPlayers.push({ name: p.name, class: p.class, level: p.level, x: p.x, y: p.y, hp: p.hp, hpMax: p.hpMax });
+           }
         }
       });
     }
@@ -296,14 +332,15 @@ io.on('connection', async (socket) => {
       bossStatus: freshBoss.status,
       bossX: freshBoss.x,
       bossY: freshBoss.y,
+      mobs: roomMobs[player.roomName] || [],
       player: { hp: player.hp, hpMax: player.hpMax, x: player.x, y: player.y },
       playersInZone: zone.type === 'guild' ? getPlayersInZone(zoneId).map(p => p.name) : [player.name],
       otherPlayers
     });
 
-    // Notify others in guild zone
-    if (zone.type === 'guild') {
-      socket.to(`zone:${zoneId}`).emit('player_joined_zone', {
+    // Notify others in room
+    if (zone.type === 'guild' || zone.type === 'city' || player.partyId) {
+      socket.to(player.roomName).emit('player_joined_zone', {
         name: player.name, class: player.class, level: player.level,
         x: player.x, y: player.y, hp: player.hp, hpMax: player.hpMax,
         zoneId,
@@ -353,8 +390,8 @@ io.on('connection', async (socket) => {
     player.lastMoveTime = now;
 
     const zone = ZONES[player.currentZone];
-    if (zone && zone.type === 'guild') {
-      socket.to(`zone:${player.currentZone}`).emit('player_moved', {
+    if (zone && (zone.type === 'guild' || zone.type === 'city' || player.partyId)) {
+      socket.to(player.roomName).emit('player_moved', {
         name: player.name, x: pos.x, y: pos.y
       });
     }
@@ -366,11 +403,12 @@ io.on('connection', async (socket) => {
     if (!player || !player.currentZone) return;
 
     const zoneId = player.currentZone;
-    socket.leave(`zone:${zoneId}`);
+    if (player.roomName) socket.leave(player.roomName);
 
-    if (ZONES[zoneId]?.type === 'guild') {
+    const prevZoneType = ZONES[zoneId]?.type;
+    if (prevZoneType === 'guild' || prevZoneType === 'city' || player.partyId) {
       player.currentZone = null;
-      socket.to(`zone:${zoneId}`).emit('player_left_zone', {
+      socket.to(player.roomName).emit('player_left_zone', {
         name: player.name, zoneId,
         playersInZone: getPlayersInZone(zoneId).map(p => p.name)
       });
@@ -389,9 +427,10 @@ io.on('connection', async (socket) => {
     if (player) await savePlayerToDB(player);
     if (player && player.currentZone) {
       const zoneId = player.currentZone;
-      socket.leave(`zone:${zoneId}`);
-      if (ZONES[zoneId]?.type === 'guild') {
-        io.to(`zone:${zoneId}`).emit('player_left_zone', {
+      if (player.roomName) socket.leave(player.roomName);
+      const prevZoneType = ZONES[zoneId]?.type;
+      if (prevZoneType === 'guild' || prevZoneType === 'city' || player.partyId) {
+        io.to(player.roomName).emit('player_left_zone', {
           name: player.name, zoneId,
           playersInZone: getPlayersInZone(zoneId).map(p => p.name)
         });

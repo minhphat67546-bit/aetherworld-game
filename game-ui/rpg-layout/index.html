@@ -114,6 +114,13 @@
           <span class="nav-btn__label">Craft</span>
         </button>
 
+        <button id="nav-players" class="nav-btn" data-panel="players" data-tooltip="Người chơi quanh đây">
+          <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span class="nav-btn__label">Players</span>
+        </button>
+
         <button id="nav-npc" class="nav-btn" data-panel="npc" data-tooltip="Trò chuyện NPC">
           <svg class="nav-btn__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -172,6 +179,15 @@
           <p class="death-overlay__timer">Hồi sinh sau <span id="death-timer">5</span> giây...</p>
         </div>
 
+        <!-- PARTY HUD -->
+        <div id="party-hud" style="display:none; position:absolute; top:80px; left:20px; z-index:100; flex-direction:column; gap:8px;">
+            <div style="font-weight:bold; color:var(--clr-primary); margin-bottom:5px; font-size: 0.9rem; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); display:inline-block;">
+                👥 TỔ ĐỘI 
+                <button id="btn-leave-party" style="margin-left: 10px; background:rgba(239,71,111,0.2);border:1px solid rgba(239,71,111,0.5);color:#fff;border-radius:4px;cursor:pointer;font-size:10px;padding:2px 5px;">Rời</button>
+            </div>
+            <div id="party-members-list" style="display:flex; flex-direction:column; gap:5px;"></div>
+        </div>
+
         <!-- Loot Drop Overlay -->
         <div id="loot-overlay" class="loot-overlay" style="display:none;">
           <div class="loot-card glass-panel">
@@ -181,6 +197,72 @@
             <div style="display:flex; gap:10px; margin-top:10px;">
               <button id="loot-collect-btn" class="btn-action btn-loot" style="flex:1;">NHẬN TẤT CẢ</button>
               <button id="loot-exit-btn" class="btn-action btn-loot" style="flex:1; background:rgba(239,71,111,0.2); border:1px solid rgba(239,71,111,0.5);">THOÁT KHU VỰC</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trade Request Overlay -->
+        <div id="trade-req-overlay" class="loot-overlay" style="display:none; z-index: 50;">
+          <div class="loot-card glass-panel">
+            <h3 class="loot-card__title" style="color:var(--clr-gold);">🤝 LỜI MỜI GIAO DỊCH</h3>
+            <p style="text-align:center; margin: 15px 0;"><span id="trade-req-name" style="font-weight:bold; color:#fff;">Player</span> muốn giao dịch với bạn.</p>
+            <div style="display:flex; gap:10px;">
+              <button id="trade-accept-btn" class="btn-action btn-loot" style="flex:1; background:rgba(6,214,160,0.2); border-color:rgba(6,214,160,0.5);">Đồng ý</button>
+              <button id="trade-decline-btn" class="btn-action btn-loot" style="flex:1; background:rgba(239,71,111,0.2); border-color:rgba(239,71,111,0.5);">Từ chối</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Party Request Overlay -->
+        <div id="party-req-overlay" class="loot-overlay" style="display:none; z-index: 55;">
+          <div class="loot-card glass-panel">
+            <h3 class="loot-card__title" style="color:var(--clr-primary);">👥 LỜI MỜI TỔ ĐỘI</h3>
+            <p style="text-align:center; margin: 15px 0;"><span id="party-req-name" style="font-weight:bold; color:#fff;">Player</span> mời bạn vào tổ đội.</p>
+            <div style="display:flex; gap:10px;">
+              <button id="party-accept-btn" class="btn-action btn-loot" style="flex:1; background:rgba(6,214,160,0.2); border-color:rgba(6,214,160,0.5);">Chấp nhận</button>
+              <button id="party-decline-btn" class="btn-action btn-loot" style="flex:1; background:rgba(239,71,111,0.2); border-color:rgba(239,71,111,0.5);">Từ chối</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trade Window Overlay -->
+        <div id="trade-window-overlay" class="loot-overlay" style="display:none; z-index: 60; align-items: center;">
+          <div class="loot-card glass-panel" style="max-width: 600px; width: 90vw;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:10px; margin-bottom:15px;">
+              <h3 class="loot-card__title" style="margin:0; border:none; padding:0;">⚖️ GIAO DỊCH VỚI <span id="trade-partner-title" style="color:var(--clr-gold);">Player</span></h3>
+              <button id="trade-cancel-btn" style="background:none; border:none; color:var(--clr-hp); cursor:pointer; font-size:1.2rem;">&times;</button>
+            </div>
+            
+            <div style="display:flex; gap:15px; margin-bottom: 20px;">
+              <!-- Cột Bạn -->
+              <div style="flex:1; border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:10px; background:rgba(0,0,0,0.3);">
+                <h4 style="color:var(--clr-primary); text-align:center; margin-bottom:10px;">BẠN</h4>
+                <div style="display:flex; gap:5px; margin-bottom:10px;">
+                  <input type="number" id="trade-my-gold" min="0" value="0" style="flex:1; background:#0b0914; color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:4px; padding:5px;">
+                  <button id="trade-my-gold-btn" style="background:rgba(255,159,28,0.2); border:1px solid rgba(255,159,28,0.5); color:#fff; border-radius:4px; cursor:pointer;">Đưa Vàng</button>
+                </div>
+                <div id="trade-my-items" style="display:flex; flex-wrap:wrap; gap:5px; min-height:80px; border:1px dashed rgba(255,255,255,0.1); padding:5px; border-radius:4px;"></div>
+                <div style="text-align:center; margin-top:10px; font-weight:bold; font-size:0.8rem;" id="trade-my-status">
+                  <span style="color:var(--clr-text-muted);">Chưa Khóa</span>
+                </div>
+              </div>
+
+              <!-- Cột Đối Tác -->
+              <div style="flex:1; border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:10px; background:rgba(0,0,0,0.3);">
+                <h4 style="color:var(--clr-hp); text-align:center; margin-bottom:10px;">ĐỐI TÁC</h4>
+                <div style="margin-bottom:10px; padding:5px; background:#0b0914; border:1px solid rgba(255,255,255,0.2); border-radius:4px; text-align:center;">
+                  <span style="color:var(--clr-gold);">💰 <span id="trade-their-gold">0</span> Vàng</span>
+                </div>
+                <div id="trade-their-items" style="display:flex; flex-wrap:wrap; gap:5px; min-height:80px; border:1px solid rgba(255,255,255,0.1); padding:5px; border-radius:4px; background:rgba(0,0,0,0.5);"></div>
+                <div style="text-align:center; margin-top:10px; font-weight:bold; font-size:0.8rem;" id="trade-their-status">
+                  <span style="color:var(--clr-text-muted);">Chưa Khóa</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:center; gap:15px;">
+              <button id="trade-lock-btn" class="btn-action" style="padding:10px 30px; background:rgba(255,159,28,0.2); border-color:rgba(255,159,28,0.5);">🔒 KHÓA</button>
+              <button id="trade-confirm-btn" class="btn-action" style="padding:10px 30px; background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.2); color:var(--clr-text-muted); cursor:not-allowed;" disabled>✅ XÁC NHẬN</button>
             </div>
           </div>
         </div>
@@ -209,11 +291,11 @@
       <!-- Skill Bar (bottom) -->
       <div class="viewport__hud" id="skill-bar-hud" style="display:none;">
         <div class="skill-bar">
-          <button class="skill-slot" id="skill-1" data-key="1"><span class="skill-slot__icon">⚔️</span><span class="skill-slot__key">1</span></button>
-          <button class="skill-slot" id="skill-2" data-key="2"><span class="skill-slot__icon">🔥</span><span class="skill-slot__key">2</span></button>
-          <button class="skill-slot" id="skill-3" data-key="3"><span class="skill-slot__icon">🛡️</span><span class="skill-slot__key">3</span></button>
-          <button class="skill-slot" id="skill-4" data-key="4"><span class="skill-slot__icon">✨</span><span class="skill-slot__key">4</span></button>
-          <button class="skill-slot skill-slot--ultimate" id="skill-ult" data-key="R"><span class="skill-slot__icon">💀</span><span class="skill-slot__key">R</span></button>
+          <button class="skill-slot" id="skill-1" data-key="1"><span class="skill-slot__icon">⚔️</span><span class="skill-slot__key">1</span><div class="cooldown-overlay"></div></button>
+          <button class="skill-slot" id="skill-2" data-key="2"><span class="skill-slot__icon">🔥</span><span class="skill-slot__key">2</span><div class="cooldown-overlay"></div></button>
+          <button class="skill-slot" id="skill-3" data-key="3"><span class="skill-slot__icon">🛡️</span><span class="skill-slot__key">3</span><div class="cooldown-overlay"></div></button>
+          <button class="skill-slot" id="skill-4" data-key="4"><span class="skill-slot__icon">✨</span><span class="skill-slot__key">4</span><div class="cooldown-overlay"></div></button>
+          <button class="skill-slot skill-slot--ultimate" id="skill-r" data-key="R"><span class="skill-slot__icon">💀</span><span class="skill-slot__key">R</span><div class="cooldown-overlay"></div></button>
         </div>
       </div>
     </main>
@@ -223,7 +305,9 @@
       <!-- Player Info -->
       <div class="player-info">
         <div class="player-info__avatar" id="player-avatar">
-          <div class="player-info__avatar-placeholder">⚔️</div>
+          <!-- Sprite preview using CSS background-image to show only the first frame -->
+          <div id="player-sprite-preview" style="width:52px;height:52px;border-radius:8px;display:none;image-rendering:pixelated;background-color:rgba(255,255,255,0.05);"></div>
+          <div class="player-info__avatar-placeholder" id="avatar-placeholder">⚔️</div>
           <div class="player-info__level" id="player-level">Lv 1</div>
         </div>
         <div class="player-info__details">
@@ -307,7 +391,11 @@
     <span id="toast-msg"></span>
   </div>
 
-  <script src="engine.js"></script>
-  <script src="main.js"></script>
+  <!-- Game Engine (must load first - defines GameEngine global) -->
+  <script src="engine.js?v=7"></script>
+  <!-- Sprite System — luizmelo.itch.io CC0 GIF models -->
+  <script src="sprite_system.js?v=7"></script>
+  <script src="sound_system.js?v=7"></script>
+  <script src="main.js?v=7"></script>
 </body>
 </html>

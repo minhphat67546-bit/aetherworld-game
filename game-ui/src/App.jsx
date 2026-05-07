@@ -12,7 +12,7 @@ const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], autoConnec
 
 // Asset mapping
 const ZONE_ASSETS = {
-  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/boss_treant.png',   color: '#2d6a4f' },
+  forest:  { bg: '/assets/zone_forest.png',  boss: '/assets/modelgame/Elementals_Crystal_Mauler_Free_v1.0/animations/PNG/idle/idle_1.png',   color: '#2d6a4f' },
   volcano: { bg: '/assets/zone_volcano.png',  boss: '/assets/boss_kaelthas.png', color: '#ef476f' },
   ocean:   { bg: '/assets/zone_ocean.png',    boss: '/assets/boss_kraken.png',   color: '#0077b6' },
   tower:   { bg: '/assets/zone_tower.png',    boss: '/assets/boss_lich.png',     color: '#9d4edd' },
@@ -597,10 +597,18 @@ export default function App() {
 
   const enterZone = (zoneId) => socket.emit('enter_zone', zoneId);
   const exitZone = () => { socket.emit('leave_zone'); setView('map'); setActiveZone(null); setCombatLogs([]); setOtherPlayers({}); setShowLoot(false); setLootDrop(null); };
-  const handleAttack = useCallback(() => {
-    if (!activeZone || bossHp <= 0 || isAttacking || isDead) return;
+  const handleAttack = useCallback((e) => {
+    // If it's a click event, e is an object. If called from engine.js it might be a mobId string.
+    const targetMobId = (typeof e === 'string' || typeof e === 'number') ? e : null;
+    if (!activeZone || isAttacking || isDead) return;
+    if (!targetMobId && bossHp <= 0) return; // Cannot attack boss if dead
+    
     setIsAttacking(true);
-    socket.emit('attack');
+    if (targetMobId) {
+      socket.emit('attack_mob', targetMobId);
+    } else {
+      socket.emit('attack');
+    }
     setTimeout(() => setIsAttacking(false), 500);
   }, [activeZone, bossHp, isAttacking, isDead]);
 

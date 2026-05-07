@@ -27,11 +27,12 @@ module.exports = function(getDb, JWT_SECRET, NAMES_POOL, CLASSES, RACES, randomI
 
       // Create initial character
       const charName = NAMES_POOL[randomInt(0, NAMES_POOL.length - 1)] + '_' + randomInt(10, 99);
-      await db.collection('characters').insertOne({
-        userId: result.insertedId.toString(),
-        name: charName,
-        class: CLASSES[randomInt(0, CLASSES.length - 1)],
-        race: RACES[randomInt(0, RACES.length - 1)],
+        const rIndex = randomInt(0, RACES.length - 1);
+        await db.collection('characters').insertOne({
+          userId: result.insertedId.toString(),
+          name: charName,
+          class: CLASSES[rIndex],
+          race: RACES[rIndex],
         level: 1,
         hp: 48000, hpMax: 48000,
         combatRating: randomInt(8000, 15000),

@@ -13,7 +13,7 @@
     view:'auth', authMode:'login', character:null, zones:[], connected:false,
     isLoggedIn:false, activeZone:null, bossHp:0, bossHpMax:1, combatLogs:[],
     otherPlayers:{}, isDead:false, deathTimer:0, lootDrop:null, currentPanel:null,
-    npcChatHistory: []
+    npcChatHistory: [], mobs: []
   };
 
   // DOM refs
@@ -88,6 +88,7 @@
 
   socket.on('init', data => {
     state.character = data.player; state.zones = data.zones;
+    state.skills = data.skills;
     updatePlayerUI();
     buildInventoryGrid();
     $('online-count').textContent = data.onlineCount + ' Online';
@@ -96,6 +97,11 @@
       showView('game');
     }
     GameEngine.setPlayerInfo(data.player.name, data.player.hp, data.player.hpMax);
+    // Sync race-based GIF model
+    if (data.player.race && GameEngine.setPlayerRace) {
+      GameEngine.setPlayerRace(data.player.race);
+    }
+    updateAvatarSprite(data.player.race);
   });
 
   socket.on('online_count', c => $('online-count').textContent = c + ' Online');
@@ -113,6 +119,10 @@
     GameEngine.setZone(data.zoneId);
     GameEngine.setPlayerPos(data.player.x||150, data.player.y||300);
     if (data.zone.boss) GameEngine.setBoss(data.bossX||650, data.bossY||120, data.bossHp, data.zone.boss.hpMax);
+    
+    state.mobs = data.mobs || [];
+    GameEngine.setMobs(state.mobs);
+    
     GameEngine.setOtherPlayers(state.otherPlayers);
     GameEngine.setPlayerInfo(state.character.name, state.character.hp, state.character.hpMax);
 
@@ -144,6 +154,55 @@
     }
   });
 
+  socket.on('mobs_moved', data => {
+    // data is array of {id, x, y}
+    data.forEach(dm => {
+        const m = state.mobs.find(mob => mob.id === dm.id);
+        if (m) { m.x = dm.x; m.y = dm.y; }
+    });
+    GameEngine.setMobs(state.mobs);
+  });
+
+  socket.on('mob_attack', data => {
+      // data: mobId, targetName, damage, targetHp
+      if (data.targetName === state.character.name) {
+          state.character.hp = data.targetHp;
+          GameEngine.setPlayerInfo(state.character.name, state.character.hp, state.character.hpMax);
+          updatePlayerUI();
+          GameEngine.createDamageText(data.damage, GameEngine.getPlayer().x, GameEngine.getPlayer().y - 40, false, true);
+      }
+      addLog(`💥 Mob đánh ${data.targetName} mất ${data.damage} HP!`, 'boss');
+  });
+
+  socket.on('mob_attack_result', data => {
+      const { attackerName, mobId, damage, isCrit, mobHp } = data;
+      const mob = state.mobs.find(m => m.id === mobId);
+      if (mob) {
+          mob.hp = mobHp;
+          GameEngine.setMobs(state.mobs);
+          // Queue damage at impact frame
+          GameEngine.queueDamage(damage, mob.x, mob.y - 30, isCrit, false, null, null);
+      }
+      addLog(`🗡️ ${attackerName} chém Mob mất ${damage} HP${isCrit ? ' (CRIT!)' : ''}`, 'dmg');
+  });
+
+  socket.on('mob_killed', data => {
+      const { mobId, mobName, loot, newLevel } = data;
+      state.mobs = state.mobs.filter(m => m.id !== mobId);
+      GameEngine.setMobs(state.mobs);
+      addLog(`🎉 Đã tiêu diệt ${mobName}! Nhận ${loot.gold} Vàng.`, 'system');
+      if (loot.items && loot.items.length > 0) {
+          loot.items.forEach(i => {
+              addLog(`🎁 Rơi đồ: [${i.name}]`, 'system');
+              showToast(`Nhặt được ${i.name}`, true);
+          });
+      }
+      if (newLevel && newLevel > state.character.level) {
+          state.character.level = newLevel;
+          showToast(`Lên cấp ${newLevel}!`, true);
+      }
+  });
+
   socket.on('force_move', data => {
     GameEngine.setPlayerPos(data.x, data.y);
   });
@@ -153,21 +212,54 @@
     showToast(data.msg, false);
   });
 
+  socket.on('kicked', data => {
+    alert(data.msg);
+    window.location.href = '../web-portal/index.html';
+  });
+
   socket.on('attack_result', data => {
     state.bossHp = data.bossHp;
     GameEngine.setBossHp(data.bossHp);
     updateBossUI();
     const isMe = data.attackerName === state.character?.name;
     addLog(`${isMe?'[Bạn]':`[${data.attackerName}]`} Gây ${data.damage.toLocaleString()} sát thương ${data.isCrit?'(Chí mạng! 💥)':''}`, isMe?'player':'guild');
-    GameEngine.triggerVfx('boss');
+    
+    // Queue damage text + VFX to fire at the impact frame of the attack animation
+    const b = GameEngine.getBoss();
+    if (b && b.alive) {
+        GameEngine.queueDamage(
+          data.damage,
+          b.x + 90,
+          b.y + 60,
+          data.isCrit,
+          false,
+          'boss',
+          null
+        );
+    }
   });
 
   socket.on('boss_attacks_you', data => {
     state.character.hp = data.playerHp;
     updatePlayerUI();
-    addLog(`[${data.bossName}] Tấn công gây ${data.damage.toLocaleString()} sát thương!`, 'boss');
+    addLog(`[${data.bossName}] ${data.attackName ? `dùng [${data.attackName}]` : 'Tấn công'} gây ${data.damage.toLocaleString()} sát thương!`, 'boss');
     GameEngine.triggerVfx('player');
+
+    // Show damage text on player
+    const p = GameEngine.getPlayer();
+    if (p) {
+        GameEngine.createDamageText(data.damage, p.x + 32, p.y + 10, false, true);
+    }
+    if (typeof SoundSystem !== 'undefined') SoundSystem.playerHurt();
   });
+  socket.on('sync_mana', data => {
+      if (state.character) {
+          state.character.mp = data.mp;
+          state.character.mpMax = data.mpMax;
+          updatePlayerUI();
+      }
+  });
+
   socket.on('boss_moved', data => { GameEngine.setBossPos(data.x, data.y); });
   socket.on('boss_attack_anim', () => { 
     GameEngine.setBossAttackAnim(true); 
@@ -180,6 +272,7 @@
   socket.on('boss_killed', data => {
     state.bossHp = 0; GameEngine.setBossHp(0); updateBossUI();
     addLog(`🏆 ${data.killerName} đã tiêu diệt ${data.bossName}!`, 'system');
+    if (typeof SoundSystem !== 'undefined') SoundSystem.levelUp();
     if (data.loot) {
       state.lootDrop = data.loot; showLoot(data.loot);
       state.character.level = data.newLevel || (state.character.level + 1);
@@ -187,6 +280,7 @@
       state.character.inventory = [...(state.character.inventory||[]), ...data.loot.items];
       state.character.bossKills = (state.character.bossKills||0) + 1;
       updatePlayerUI(); buildInventoryGrid();
+      if (typeof SoundSystem !== 'undefined') SoundSystem.lootPickup();
     }
   });
   socket.on('boss_respawned', data => {
@@ -205,6 +299,7 @@
 
   socket.on('you_died', data => {
     state.isDead = true; GameEngine.setDead(true);
+    if (typeof SoundSystem !== 'undefined') SoundSystem.playerDead();
     $('death-overlay').style.display = 'flex';
     let t = 5;
     $('death-timer').textContent = t;
@@ -304,6 +399,36 @@
     if (zoneId) enterZone(zoneId);
   }, 200);
 
+  // ====== AVATAR SPRITE PREVIEW ======
+  function updateAvatarSprite(race) {
+    if (typeof SpriteSystem === 'undefined') return;
+    const previewEl = $('player-sprite-preview');
+    const placeholderEl = $('avatar-placeholder');
+    if (!previewEl) return;
+    
+    const config = SpriteSystem.SPRITE_CONFIG ? SpriteSystem.SPRITE_CONFIG[race] : null;
+    if (!config) {
+      if (placeholderEl) placeholderEl.style.display = 'flex';
+      previewEl.style.display = 'none';
+      return;
+    }
+    
+    // Use the Idle.png spritesheet
+    const url = config.path + 'Idle.png';
+    const frames = config.idleFrames || 8;
+    
+    previewEl.style.backgroundImage = `url('${url}')`;
+    // Scale the background so the first frame fits horizontally
+    previewEl.style.backgroundSize = `${frames * 100}% 100%`;
+    previewEl.style.backgroundPosition = 'left center';
+    previewEl.style.backgroundRepeat = 'no-repeat';
+    
+    previewEl.style.display = 'block';
+    previewEl.title = `Model: ${race}`;
+    if (placeholderEl) placeholderEl.style.display = 'none';
+  }
+
+
   // ====== UI UPDATES ======
   function updatePlayerUI() {
     const c = state.character; if (!c) return;
@@ -313,8 +438,9 @@
     $('player-level').textContent = 'Lv ' + c.level;
     $('hp-value').textContent = `${(c.hp||0).toLocaleString()} / ${(c.hpMax||0).toLocaleString()}`;
     $('hp-fill').style.width = `${((c.hp||0)/(c.hpMax||1))*100}%`;
-    $('mp-value').textContent = '12,000 / 12,000';
-    $('mp-fill').style.width = '100%';
+    const mpMax = c.mpMax || 1;
+    $('mp-value').textContent = `${Math.floor(c.mp||0).toLocaleString()} / ${mpMax.toLocaleString()}`;
+    $('mp-fill').style.width = `${((c.mp||0)/mpMax)*100}%`;
     const expPct = ((c.level||1)*750 % 10000)/100;
     $('exp-value').textContent = `${Math.floor(expPct*100)} / 10,000`;
     $('exp-fill').style.width = `${expPct}%`;
@@ -393,8 +519,14 @@
         slot.classList.add('inv-slot--' + (it.rarity||'common'));
         slot.innerHTML = `<span>${it.icon||'?'}</span>`;
         if (it.count > 1) slot.innerHTML += `<span class="inv-slot__count">${it.count}</span>`;
-        slot.title = `${it.name} (${it.rarity}) - Click để sử dụng`;
-        slot.addEventListener('click', () => socket.emit('use_item', { itemName: it.name }));
+        slot.title = `${it.name} (${it.rarity}) - Click để sử dụng/giao dịch`;
+        slot.addEventListener('click', () => {
+            if (tradeState.active && !tradeState.myLocked) {
+                window.offerItemToTrade(i);
+            } else if (!tradeState.active) {
+                socket.emit('use_item', { itemName: it.name });
+            }
+        });
       }
       grid.appendChild(slot);
     }
@@ -506,7 +638,7 @@
   }
 
   function getPanelTitle(p) {
-    return { stats:'📊 CHỈ SỐ NHÂN VẬT', shop:'🛒 CỬA HÀNG', guilds:'👥 BANG HỘI', craft:'🔨 CHẾ TẠO', settings:'⚙️ CÀI ĐẶT', npc:'💬 TRÒ CHUYỆN NPC' }[p] || '';
+    return { stats:'📊 CHỈ SỐ NHÂN VẬT', shop:'🛒 CỬA HÀNG', guilds:'👥 BANG HỘI', craft:'🔨 CHẾ TẠO', settings:'⚙️ CÀI ĐẶT', npc:'💬 TRÒ CHUYỆN NPC', players:'👥 NGƯỜI CHƠI QUANH ĐÂY' }[p] || '';
   }
 
   function getPanelContent(p) {
@@ -585,7 +717,22 @@
             <button type="submit" style="padding: 10px 16px; border-radius: 8px; background: linear-gradient(45deg, #ff9f1c, #ffd166); border: none; font-weight: bold; color: #0b0914; cursor: pointer;">GỬI</button>
           </form>
         </div>
+        </div>
       `;
+    }
+    if (p === 'players') {
+      const others = Object.values(state.otherPlayers || {});
+      if (!others.length) return `<div style="text-align:center;color:var(--clr-text-muted);padding:40px">Không có ai xung quanh.</div>`;
+      return `<div style="display:flex;flex-direction:column;gap:10px;">` + others.map(op => `
+        <div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:bold;color:var(--clr-primary);font-size:1.1rem;">${op.name}</div>
+            <div style="font-size:0.8rem;color:var(--clr-text-muted)">Lv ${op.level} - ${op.class}</div>
+          </div>
+          <button onclick="window.requestTrade('${op.name}')" class="btn-action" style="padding:6px 12px; font-size:0.8rem; background:rgba(6,214,160,0.2); border-color:rgba(6,214,160,0.5);">🤝 GIAO DỊCH</button>
+          <button onclick="window.inviteParty('${op.name}')" class="btn-action" style="padding:6px 12px; font-size:0.8rem; background:rgba(157,78,221,0.2); border-color:rgba(157,78,221,0.5); margin-left: 5px;">👥 TỔ ĐỘI</button>
+        </div>
+      `).join('') + `</div>`;
     }
     return '';
   }
@@ -606,6 +753,192 @@
     });
   });
 
+  // ====== PARTY SYSTEM ======
+  window.inviteParty = (targetName) => {
+      socket.emit('party_invite', targetName);
+      showToast(`Đã gửi lời mời tổ đội cho ${targetName}`, true);
+  };
+
+  socket.on('party_invite_received', data => {
+      $('party-req-name').textContent = data.from;
+      $('party-req-overlay').style.display = 'flex';
+      
+      $('party-accept-btn').onclick = () => {
+          socket.emit('party_accept', data.fromId);
+          $('party-req-overlay').style.display = 'none';
+      };
+      $('party-decline-btn').onclick = () => {
+          $('party-req-overlay').style.display = 'none';
+      };
+  });
+
+  socket.on('party_update', data => {
+      if (!data || !data.members || data.members.length === 0) {
+          $('party-hud').style.display = 'none';
+          $('party-members-list').innerHTML = '';
+          return;
+      }
+      $('party-hud').style.display = 'flex';
+      $('party-members-list').innerHTML = data.members.map(m => {
+        const hpPct = Math.max(0, Math.min(100, (m.hp / m.hpMax) * 100));
+        return `
+        <div style="background:rgba(0,0,0,0.6); padding:6px 10px; border-radius:4px; border-left:3px solid var(--clr-primary); font-size:0.85rem; display:flex; flex-direction:column; gap:4px; width: 140px;">
+           <div style="display:flex; justify-content:space-between; align-items:center;">
+             <span style="color:#fff; font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px;">${m.name}</span>
+             <span style="color:var(--clr-gold); font-size:0.7rem;">Lv ${m.level}</span>
+           </div>
+           <div style="width:100%; height:4px; background:rgba(255,255,255,0.2); border-radius:2px; overflow:hidden;">
+             <div style="width:${hpPct}%; height:100%; background:var(--clr-hp); transition: width 0.3s;"></div>
+           </div>
+        </div>
+      `}).join('');
+  });
+
+  $('btn-leave-party').addEventListener('click', () => { socket.emit('party_leave'); });
+
+  // ====== TRADE SYSTEM ======
+  let tradeState = { active: false, myLocked: false, theirLocked: false, partnerName: '' };
+  
+  window.requestTrade = (targetName) => {
+      socket.emit('trade_request', { targetName });
+      showToast(`Đã gửi lời mời giao dịch cho ${targetName}`, true);
+  };
+
+  socket.on('trade_requested', data => {
+      $('trade-req-name').textContent = data.requesterName;
+      $('trade-req-overlay').style.display = 'flex';
+      
+      $('trade-accept-btn').onclick = () => {
+          socket.emit('trade_accept', { targetName: data.requesterName });
+          $('trade-req-overlay').style.display = 'none';
+      };
+      $('trade-decline-btn').onclick = () => {
+          socket.emit('trade_decline', { targetName: data.requesterName });
+          $('trade-req-overlay').style.display = 'none';
+      };
+  });
+
+  socket.on('trade_declined', data => {
+      showToast(`${data.targetName} đã từ chối giao dịch.`, false);
+  });
+
+  socket.on('trade_started', data => {
+      tradeState = { active: true, partnerName: data.partnerName, myLocked: false, theirLocked: false };
+      $('trade-partner-title').textContent = data.partnerName;
+      $('trade-my-gold').value = 0;
+      $('trade-their-gold').textContent = '0';
+      $('trade-my-items').innerHTML = '';
+      $('trade-their-items').innerHTML = '';
+      $('trade-my-status').innerHTML = '<span style="color:var(--clr-text-muted);">Chưa Khóa</span>';
+      $('trade-their-status').innerHTML = '<span style="color:var(--clr-text-muted);">Chưa Khóa</span>';
+      $('trade-lock-btn').style.background = 'rgba(255,159,28,0.2)';
+      $('trade-lock-btn').textContent = '🔒 KHÓA';
+      $('trade-confirm-btn').disabled = true;
+      $('trade-confirm-btn').style.cursor = 'not-allowed';
+      $('trade-confirm-btn').style.background = 'rgba(255,255,255,0.1)';
+      $('trade-window-overlay').style.display = 'flex';
+      
+      // Mở túi đồ
+      if(state.currentPanel !== 'inventory') $('inventory-btn').click();
+  });
+
+  socket.on('trade_update', data => {
+      // Update their UI
+      $('trade-their-gold').textContent = data.theirGold.toLocaleString();
+      $('trade-their-items').innerHTML = data.theirItems.map(item => `<div style="width:30px;height:30px;background:rgba(255,255,255,0.1);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:16px;" title="${item.name}">${item.icon||'📦'}</div>`).join('');
+      
+      // Update my UI
+      if(document.activeElement !== $('trade-my-gold')) {
+          $('trade-my-gold').value = data.myGold;
+      }
+      $('trade-my-items').innerHTML = data.myItems.map(item => `<div style="width:30px;height:30px;background:rgba(255,255,255,0.1);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;" title="Bỏ ra: ${item.name}" onclick="socket.emit('trade_remove_item', {index: ${item.originalIndex}})">${item.icon||'📦'}</div>`).join('');
+      
+      tradeState.theirLocked = data.theirLocked;
+      $('trade-their-status').innerHTML = tradeState.theirLocked ? '<span style="color:var(--clr-success);">Đã Khóa</span>' : '<span style="color:var(--clr-text-muted);">Chưa Khóa</span>';
+      
+      tradeState.myLocked = data.myLocked;
+      $('trade-my-status').innerHTML = tradeState.myLocked ? '<span style="color:var(--clr-success);">Đã Khóa</span>' : '<span style="color:var(--clr-text-muted);">Chưa Khóa</span>';
+      $('trade-lock-btn').textContent = tradeState.myLocked ? '🔓 MỞ KHÓA' : '🔒 KHÓA';
+      $('trade-lock-btn').style.background = tradeState.myLocked ? 'rgba(6,214,160,0.2)' : 'rgba(255,159,28,0.2)';
+
+      if (tradeState.myLocked && tradeState.theirLocked) {
+          $('trade-confirm-btn').disabled = false;
+          $('trade-confirm-btn').style.cursor = 'pointer';
+          $('trade-confirm-btn').style.background = 'rgba(6,214,160,0.2)';
+          $('trade-confirm-btn').style.color = 'var(--clr-success)';
+          $('trade-confirm-btn').textContent = '✅ XÁC NHẬN';
+      } else {
+          $('trade-confirm-btn').disabled = true;
+          $('trade-confirm-btn').style.cursor = 'not-allowed';
+          $('trade-confirm-btn').style.background = 'rgba(255,255,255,0.1)';
+          $('trade-confirm-btn').style.color = 'var(--clr-text-muted)';
+          $('trade-confirm-btn').textContent = '✅ XÁC NHẬN';
+      }
+  });
+
+  socket.on('trade_cancelled', data => {
+      $('trade-window-overlay').style.display = 'none';
+      tradeState.active = false;
+      showToast(data.msg || "Giao dịch đã bị hủy", false);
+      buildInventoryGrid(); // Render lại túi đồ
+  });
+
+  socket.on('trade_completed', data => {
+      $('trade-window-overlay').style.display = 'none';
+      tradeState.active = false;
+      showToast("Giao dịch thành công!", true);
+  });
+
+  // UI Event Listeners for Trade
+  $('trade-cancel-btn').addEventListener('click', () => { socket.emit('trade_cancel'); });
+  
+  window.offerGoldToTrade = () => {
+      if(tradeState.myLocked) return;
+      const amount = parseInt($('trade-my-gold').value) || 0;
+      socket.emit('trade_update_offer', { gold: amount, items: null });
+  };
+
+  $('trade-my-gold-btn').addEventListener('click', () => {
+      window.offerGoldToTrade();
+  });
+  
+  $('trade-lock-btn').addEventListener('click', () => { 
+      window.offerGoldToTrade(); // Sync gold right before lock
+      setTimeout(() => { socket.emit('trade_lock'); }, 10);
+  });
+  
+  $('trade-confirm-btn').addEventListener('click', () => { 
+      socket.emit('trade_confirm'); 
+      $('trade-confirm-btn').textContent = "⏳ Đang đợi...";
+      $('trade-confirm-btn').disabled = true;
+  });
+
+  // Auto-sync gold on typing
+  $('trade-my-gold').addEventListener('input', () => {
+      window.offerGoldToTrade();
+  });
+
+  // Update Inventory click to offer items
+  window.offerItemToTrade = (itemIndex) => {
+      if (!tradeState.active || tradeState.myLocked) return;
+      socket.emit('trade_add_item', { index: itemIndex });
+      
+      // Optimistic UI
+      const myItemsContainer = $('trade-my-items');
+      const item = state.character.inventory[itemIndex];
+      myItemsContainer.innerHTML += `<div style="width:30px;height:30px;background:rgba(255,255,255,0.1);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;" onclick="window.removeItemFromTrade(${itemIndex}, this)" title="${item.name}">${item.icon||'📦'}</div>`;
+      
+      // Hide from inventory grid temporarily
+      buildInventoryGrid();
+  };
+
+  window.removeItemFromTrade = (itemIndex, el) => {
+      if (!tradeState.active || tradeState.myLocked) return;
+      socket.emit('trade_remove_item', { index: itemIndex });
+      el.remove();
+      buildInventoryGrid();
+  };
+
   // ====== TOAST ======
   function showToast(msg, success) {
     const t = $('toast');
@@ -615,17 +948,141 @@
     setTimeout(() => { t.style.display = 'none'; }, 3000);
   }
 
+  // KEYBOARD & SKILLS
+  const keys = {};
+
+  function startCooldownUI(skillKey, cooldownTime) {
+      const btn = $(`skill-${skillKey}`);
+      if (!btn) return;
+      const overlay = btn.querySelector('.cooldown-overlay');
+      if (!overlay) return;
+
+      overlay.style.height = "100%";
+      const startTime = Date.now();
+
+      function animateCooldown() {
+          const elapsed = Date.now() - startTime;
+          const remaining = Math.max(0, cooldownTime - elapsed);
+          const percentage = (remaining / cooldownTime) * 100;
+
+          overlay.style.height = `${percentage}%`;
+
+          if (percentage > 0) {
+              requestAnimationFrame(animateCooldown);
+          }
+      }
+      
+      requestAnimationFrame(animateCooldown);
+  }
+  
+  function useSkill(key) {
+      if (!state.skills) return;
+      const skillKey = key.toLowerCase(); 
+      const skill = state.skills[skillKey];
+
+      if (!skill) return; 
+
+      const currentTime = Date.now();
+      if (!skill.lastUsed) skill.lastUsed = 0;
+
+      // 1. Cooldown
+      if (currentTime - skill.lastUsed < skill.cooldown) {
+          const remainingTime = ((skill.cooldown - (currentTime - skill.lastUsed)) / 1000).toFixed(1);
+          addLog(`Chiêu [${skill.name}] đang hồi... ${remainingTime}s!`, 'system');
+          return;
+      }
+
+      // 2. Mana
+      if (state.character.mp < skill.manaCost) {
+          addLog(`Không đủ Mana để dùng [${skill.name}]!`, 'system');
+          return;
+      }
+
+      // 3. Cast
+      state.character.mp -= skill.manaCost;
+      skill.lastUsed = currentTime;
+      updatePlayerUI();
+      startCooldownUI(skillKey, skill.cooldown);
+
+      addLog(`⚡ Tung chiêu: ${skill.name}! (-${skill.manaCost} MP)`, 'player');
+      if (typeof SoundSystem !== 'undefined') SoundSystem.skill();
+      if (state.activeZone) {
+          socket.emit('use_skill', { skillKey });
+      }
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.code === 'Space') {
+      if (state.activeZone && state.activeZone.type === 'pvp') {
+        const now = Date.now();
+        if (now - lastBasicAttack < basicAttackCooldown) return;
+        lastBasicAttack = now;
+
+        let target = null;
+        let minDist = Infinity;
+        Object.values(state.otherPlayers).forEach(p => {
+           if (p.isDead) return;
+           const dx = p.x - state.character.x;
+           const dy = p.y - state.character.y;
+           const dist = Math.sqrt(dx*dx + dy*dy);
+           if (dist < minDist && dist < 100) { minDist = dist; target = p; }
+        });
+        if (target) socket.emit('pvp_attack', target.name);
+      }
+    } 
+    else if (['1', '2', '3', '4', 'r', 'R'].includes(e.key)) {
+        useSkill(e.key);
+    }
+  });
+
   // ====== INIT ======
+  let lastBasicAttack = 0;
+  const basicAttackCooldown = 1500; // 1.5s cooldown cho đánh thường
+  let lastClientRegenTime = Date.now();
+
+  function clientManaLoop() {
+      const now = Date.now();
+      const dt = (now - lastClientRegenTime) / 1000;
+      lastClientRegenTime = now;
+
+      if (state.character && state.character.mp < state.character.mpMax) {
+          const regenAmount = state.character.mpMax * 0.01 * dt;
+          state.character.mp = Math.min(state.character.mpMax, state.character.mp + regenAmount);
+          updatePlayerUI();
+      }
+      requestAnimationFrame(clientManaLoop);
+  }
+
   async function init() {
     await GameEngine.preloadAssets(SERVER);
     GameEngine.init(document.getElementById('gameCanvas'), {
       onMove: (x,y) => { if (state.activeZone) socket.emit('player_move', {x,y}); },
-      onAttack: () => {
-        if (!state.activeZone || state.bossHp <= 0 || state.isDead) return;
-        socket.emit('attack');
+      onAttack: (mobId) => {
+        if (!state.activeZone || state.isDead) return false;
+        const now = Date.now();
+        if (now - lastBasicAttack < basicAttackCooldown) return false;
+        lastBasicAttack = now;
+        // Sound
+        if (typeof SoundSystem !== 'undefined') {
+          if (state.character && state.character.race === 'Human') SoundSystem.magicBolt();
+          else SoundSystem.swing();
+        }
+        if (mobId) {
+            socket.emit('attack_mob', mobId);
+        } else if (state.bossHp > 0) {
+            socket.emit('attack');
+        }
+        return true;
       }
     });
     buildInventoryGrid();
+    requestAnimationFrame(clientManaLoop);
+    // Start ambient music
+    if (typeof SoundSystem !== 'undefined') SoundSystem.startMusic();
+    initMobileControls();
+    showTutorialIfFirst();
 
     // Auto-connect
     const hasToken = localStorage.getItem('aether_token');
@@ -633,6 +1090,167 @@
     socket.connect();
 
     new ResizeObserver(() => GameEngine.resizeCanvas()).observe(document.getElementById('gameCanvas').parentElement);
+  }
+
+
+  // ====== PORTAL SOUND ======
+  const _origPortalCheck = setInterval;
+  const _enterZone_orig = (() => {
+    const _fn = window._aetherEnterZone;
+    return _fn;
+  })();
+
+  // Patch enterZone globally for sound
+  function _patchEnterZoneSound() {
+    const origInterval = setInterval(() => {
+      if (state.activeZone || state.view !== 'game') return;
+      const zoneId = GameEngine.checkPortalCollision();
+      if (zoneId) {
+        if (typeof SoundSystem !== 'undefined') SoundSystem.portalEnter();
+        enterZone(zoneId);
+      }
+    }, 200);
+  }
+
+  // ====== MOBILE CONTROLS ======
+  function initMobileControls() {
+    const isMobile = /Android|iPhone|iPad|iPod|Touch/i.test(navigator.userAgent) || window.innerWidth < 768;
+    if (!isMobile) return;
+
+    const container = document.createElement('div');
+    container.id = 'mobile-controls';
+    container.style.cssText = `
+      position: fixed; bottom: 0; left: 0; right: 0; height: 180px;
+      display: flex; align-items: flex-end; justify-content: space-between;
+      padding: 16px 24px; pointer-events: none; z-index: 900;
+    `;
+
+    // Virtual Joystick
+    const joystickZone = document.createElement('div');
+    joystickZone.style.cssText = 'width:120px;height:120px;position:relative;pointer-events:all;';
+    const joystickBase = document.createElement('div');
+    joystickBase.style.cssText = 'width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.2);position:absolute;top:0;left:0;';
+    const joystickKnob = document.createElement('div');
+    joystickKnob.style.cssText = 'width:48px;height:48px;border-radius:50%;background:rgba(157,78,221,0.7);border:2px solid rgba(220,150,255,0.6);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);transition:background 0.1s;';
+    joystickZone.append(joystickBase, joystickKnob);
+
+    let joystickActive = false, joystickOrigin = { x: 0, y: 0 };
+    joystickZone.addEventListener('touchstart', e => {
+      e.preventDefault();
+      joystickActive = true;
+      const t = e.touches[0];
+      const r = joystickZone.getBoundingClientRect();
+      joystickOrigin = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      joystickKnob.style.background = 'rgba(220,130,255,0.9)';
+    }, { passive: false });
+    joystickZone.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (!joystickActive) return;
+      const t = e.touches[0];
+      const dx = t.clientX - joystickOrigin.x;
+      const dy = t.clientY - joystickOrigin.y;
+      const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 48);
+      const angle = Math.atan2(dy, dx);
+      const kx = Math.cos(angle) * dist;
+      const ky = Math.sin(angle) * dist;
+      joystickKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+      const norm = dist / 48;
+      GameEngine.setVirtualInput({ x: (dx / 48) * norm, y: (dy / 48) * norm });
+    }, { passive: false });
+    const resetJoystick = () => {
+      joystickActive = false;
+      joystickKnob.style.transform = 'translate(-50%,-50%)';
+      joystickKnob.style.background = 'rgba(157,78,221,0.7)';
+      GameEngine.setVirtualInput({ x: 0, y: 0 });
+    };
+    joystickZone.addEventListener('touchend', resetJoystick);
+    joystickZone.addEventListener('touchcancel', resetJoystick);
+
+    // Right side buttons
+    const btnGroup = document.createElement('div');
+    btnGroup.style.cssText = 'display:flex;flex-direction:column;gap:12px;align-items:center;pointer-events:all;';
+
+    const mkBtn = (label, color, fn) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = `width:64px;height:64px;border-radius:50%;border:2px solid ${color};background:rgba(0,0,0,0.5);color:#fff;font-size:1.1rem;font-weight:bold;cursor:pointer;`;
+      b.addEventListener('touchstart', e => { e.preventDefault(); fn(); }, { passive: false });
+      return b;
+    };
+
+    const attackBtn = mkBtn('⚔️', 'rgba(239,71,111,0.8)', () => {
+      if (!state.activeZone || state.isDead) return;
+      const now = Date.now();
+      if (now - lastBasicAttack < basicAttackCooldown) return;
+      lastBasicAttack = now;
+      if (typeof SoundSystem !== 'undefined') {
+        if (state.character && state.character.race === 'Human') SoundSystem.magicBolt();
+        else SoundSystem.swing();
+      }
+      const mob = GameEngine.getNearestMob ? GameEngine.getNearestMob() : null;
+      if (mob) socket.emit('attack_mob', mob.id);
+      else if (state.bossHp > 0) socket.emit('attack');
+    });
+
+    const dodgeBtn = mkBtn('💨', 'rgba(6,214,160,0.8)', () => {
+      if (typeof GameEngine.triggerVirtualDodge === 'function') GameEngine.triggerVirtualDodge();
+    });
+
+    btnGroup.append(attackBtn, dodgeBtn);
+    container.append(joystickZone, btnGroup);
+    document.body.appendChild(container);
+  }
+
+  // ====== TUTORIAL ======
+  function showTutorialIfFirst() {
+    if (localStorage.getItem('aether_tutorial_seen')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'tutorial-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);
+      display:flex;align-items:center;justify-content:center;
+    `;
+    overlay.innerHTML = `
+      <div style="max-width:480px;width:90%;background:linear-gradient(135deg,#0e0b1e,#1a1040);border:1px solid rgba(157,78,221,0.4);border-radius:16px;padding:32px;text-align:center;color:#fff;font-family:'Inter',sans-serif;">
+        <div style="font-size:3rem;margin-bottom:12px;">⚔️</div>
+        <h2 style="font-family:'Cinzel',serif;font-size:1.5rem;color:#e0aaff;margin-bottom:8px;">Chào mừng đến AetherWorld</h2>
+        <p style="color:rgba(255,255,255,0.6);font-size:0.85rem;margin-bottom:24px;">Hướng dẫn nhanh để bắt đầu hành trình</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:28px;text-align:left;">
+          <div style="background:rgba(157,78,221,0.1);border:1px solid rgba(157,78,221,0.2);border-radius:10px;padding:12px;">
+            <div style="font-size:1.4rem;margin-bottom:6px;">🗺️</div>
+            <div style="font-weight:600;margin-bottom:3px;font-size:0.9rem;">Di Chuyển</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:0.8rem;"><kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">W A S D</kbd> hoặc mũi tên</div>
+          </div>
+          <div style="background:rgba(239,71,111,0.1);border:1px solid rgba(239,71,111,0.2);border-radius:10px;padding:12px;">
+            <div style="font-size:1.4rem;margin-bottom:6px;">⚔️</div>
+            <div style="font-weight:600;margin-bottom:3px;font-size:0.9rem;">Tấn Công</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:0.8rem;"><kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">Space</kbd> khi gần quái/boss</div>
+          </div>
+          <div style="background:rgba(6,214,160,0.1);border:1px solid rgba(6,214,160,0.2);border-radius:10px;padding:12px;">
+            <div style="font-size:1.4rem;margin-bottom:6px;">💨</div>
+            <div style="font-weight:600;margin-bottom:3px;font-size:0.9rem;">Né Đòn</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:0.8rem;"><kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">Shift</kbd> — hồi 2.5 giây</div>
+          </div>
+          <div style="background:rgba(255,159,28,0.1);border:1px solid rgba(255,159,28,0.2);border-radius:10px;padding:12px;">
+            <div style="font-size:1.4rem;margin-bottom:6px;">✨</div>
+            <div style="font-weight:600;margin-bottom:3px;font-size:0.9rem;">Chiêu Thức</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:0.8rem;"><kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">1</kbd> <kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">2</kbd> <kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">3</kbd> <kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">4</kbd> <kbd style="background:rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;">R</kbd></div>
+          </div>
+        </div>
+        <p style="color:rgba(255,255,255,0.45);font-size:0.8rem;margin-bottom:20px;">Di chuyển trên bản đồ để bước vào cổng khu vực chiến đấu</p>
+        <button id="tutorial-close-btn" style="background:linear-gradient(135deg,#9d4edd,#7b2fbe);border:none;border-radius:10px;color:#fff;font-size:1rem;font-weight:700;padding:14px 40px;cursor:pointer;width:100%;font-family:'Cinzel',serif;letter-spacing:0.05em;">
+          BẮT ĐẦU HÀNH TRÌNH ⚔️
+        </button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#tutorial-close-btn').addEventListener('click', () => {
+      localStorage.setItem('aether_tutorial_seen', '1');
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 0.4s';
+      setTimeout(() => overlay.remove(), 400);
+      if (typeof SoundSystem !== 'undefined') SoundSystem.portalEnter();
+    });
   }
 
   init();
