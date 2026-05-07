@@ -1,37 +1,49 @@
 const { players } = require('../state/gameState');
 
-// Danh sách model thử theo thứ tự ưu tiên
+// Danh sách model thử theo thứ tự ưu tiên (gọi REST API trực tiếp)
 const GEMINI_MODELS = [
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.0-flash-lite',
 ];
 
-async function callGeminiWithFallback(ai, contents, systemInstruction) {
+async function callGeminiREST(apiKey, message, systemInstruction) {
   for (const model of GEMINI_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.8,
-          maxOutputTokens: 200,
-        }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          contents: [{
+            parts: [{ text: message }]
+          }],
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 200,
+          }
+        })
       });
-      if (response && response.text) {
-        console.log(`[AI] ✅ Đã dùng model: ${model}`);
-        return response.text;
+
+      const data = await res.json();
+
+      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+        const text = data.candidates[0].content.parts[0].text;
+        console.log(`[AI] ✅ Model ${model} thành công`);
+        return text;
+      } else if (data.error) {
+        console.warn(`[AI] ⚠️ Model ${model} lỗi: ${data.error.message?.substring(0, 100)}`);
+        await new Promise(r => setTimeout(r, 500));
       }
     } catch (err) {
-      let errMsg = err.message;
-      try { errMsg = JSON.parse(err.message)?.error?.message || err.message; } catch {}
-      console.warn(`[AI] ⚠️ Model ${model} thất bại: ${errMsg.substring(0, 120)}`);
-      // Đợi chút trước khi thử model tiếp theo
+      console.warn(`[AI] ⚠️ Model ${model} fetch lỗi: ${err.message}`);
       await new Promise(r => setTimeout(r, 500));
     }
   }
-  return null; // Tất cả model đều thất bại
+  return null;
 }
 
 function registerNpcHandlers(io, socket, ai) {
@@ -39,8 +51,9 @@ function registerNpcHandlers(io, socket, ai) {
   socket.on('npc_chat', async (data) => {
     const { npcId, message } = data;
     const player = players.get(socket.id);
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    if (!ai) {
+    if (!apiKey) {
       socket.emit('npc_chat_response', { npcId, message: '⚠️ Hệ thống AI chưa được cấu hình. Thiếu GEMINI_API_KEY trên server.' });
       return;
     }
@@ -53,24 +66,22 @@ function registerNpcHandlers(io, socket, ai) {
       };
 
       const systemInstruction = npcPrompts[npcId] || `Bạn là một NPC trong thế giới AetherWorld. Tên người chơi là ${player ? player.name : 'Lữ khách'}. Trả lời ngắn gọn bằng tiếng Việt.`;
-      const contents = [{ role: 'user', parts: [{ text: message }] }];
 
-      const text = await callGeminiWithFallback(ai, contents, systemInstruction);
+      const text = await callGeminiREST(apiKey, message, systemInstruction);
 
       if (text) {
         socket.emit('npc_chat_response', { npcId, message: text });
       } else {
         socket.emit('npc_chat_response', {
           npcId,
-          message: '⚠️ [Server] AI đang quá tải hoặc đã hết quota. Vui lòng thử lại sau ít phút hoặc liên hệ admin để cập nhật API Key.'
+          message: '⚠️ AI đang quá tải. Vui lòng thử lại sau ít phút!'
         });
       }
     } catch (error) {
-      console.error('❌ NPC Chat error không xử lý được:', error);
+      console.error('❌ NPC Chat lỗi:', error.message);
       socket.emit('npc_chat_response', { npcId, message: '⚠️ Lỗi hệ thống AI. Vui lòng thử lại sau.' });
     }
   });
 }
 
 module.exports = registerNpcHandlers;
-
