@@ -41,8 +41,8 @@ const GameEngine = (function () {
 
   // ── Simple Physics (combat zones only) ──
   const PHYSICS = {
-    gravity: 0.7,
-    jumpForce: -15,
+    gravity: 0.9,     // Tăng trọng lực để nhân vật rớt xuống nhanh hơn
+    jumpForce: -11,   // Giảm lực bật nhảy để không bay quá cao
     maxFall: 18,
     accel: 1.5,
     friction: 0.82,
@@ -451,10 +451,17 @@ const GameEngine = (function () {
 
     if (!currentZoneId) {
       // ── WORLD MAP: top-down 4 hướng ──
-      if (keys.has('a') || keys.has('arrowleft') || vxInput < -0.3) { player.x -= SPEED; player.facing = 'left'; moved = true; }
-      if (keys.has('d') || keys.has('arrowright') || vxInput > 0.3) { player.x += SPEED; player.facing = 'right'; moved = true; }
-      if (keys.has('w') || keys.has('arrowup') || vyInput < -0.3) { player.y -= SPEED; moved = true; }
-      if (keys.has('s') || keys.has('arrowdown') || vyInput > 0.3) { player.y += SPEED; moved = true; }
+      let dx = 0, dy = 0;
+      if (keys.has('a') || keys.has('arrowleft') || vxInput < -0.3) { dx -= 1; player.facing = 'left'; moved = true; }
+      if (keys.has('d') || keys.has('arrowright') || vxInput > 0.3) { dx += 1; player.facing = 'right'; moved = true; }
+      if (keys.has('w') || keys.has('arrowup') || vyInput < -0.3) { dy -= 1; moved = true; }
+      if (keys.has('s') || keys.has('arrowdown') || vyInput > 0.3) { dy += 1; moved = true; }
+      
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.sqrt(dx * dx + dy * dy);
+        player.x += (dx / len) * SPEED;
+        player.y += (dy / len) * SPEED;
+      }
       player.x = Math.max(0, Math.min(limit.w - PLAYER_SIZE, player.x));
       player.y = Math.max(0, Math.min(limit.h - PLAYER_SIZE, player.y));
       player.moving = moved;
@@ -471,9 +478,16 @@ const GameEngine = (function () {
 
       // Nhảy (W / ArrowUp / Space)
       const wantJump = keys.has('w') || keys.has('arrowup') || keys.has(' ') || vyInput < -0.5;
-      if (wantJump && player.onGround) {
+      
+      // Bắt buộc nhả phím nhảy ra mới được nhảy tiếp (chống auto bunny-hop)
+      if (!wantJump) {
+        player.jumpKeyReleased = true;
+      }
+
+      if (wantJump && player.onGround && (player.jumpKeyReleased !== false)) {
         player.vy = PHYSICS.jumpForce;
         player.onGround = false;
+        player.jumpKeyReleased = false;
       }
 
       // Trọng lực

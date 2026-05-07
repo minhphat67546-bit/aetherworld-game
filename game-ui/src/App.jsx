@@ -84,10 +84,17 @@ function GameArena({ activeZone, bossHp, bossHpMax, bossStatus, character, onAtt
       setPlayerPos(prev => {
         if (isDead) return prev;  // Can't move when dead
         let { x, y } = prev;
-        if (keys.has('a')) { x -= SPEED; setFacing('left'); moving = true; }
-        if (keys.has('d')) { x += SPEED; setFacing('right'); moving = true; }
-        if (keys.has('w')) { y -= SPEED; moving = true; }
-        if (keys.has('s')) { y += SPEED; moving = true; }
+        let dx = 0, dy = 0;
+        if (keys.has('a')) { dx -= 1; setFacing('left'); moving = true; }
+        if (keys.has('d')) { dx += 1; setFacing('right'); moving = true; }
+        if (keys.has('w')) { dy -= 1; moving = true; }
+        if (keys.has('s')) { dy += 1; moving = true; }
+        
+        if (dx !== 0 || dy !== 0) {
+          const len = Math.sqrt(dx * dx + dy * dy);
+          x += (dx / len) * SPEED;
+          y += (dy / len) * SPEED;
+        }
         x = Math.max(0, Math.min(ARENA_W - PLAYER_SIZE, x));
         y = Math.max(0, Math.min(ARENA_H - PLAYER_SIZE, y));
         // Send position to server (throttled)
