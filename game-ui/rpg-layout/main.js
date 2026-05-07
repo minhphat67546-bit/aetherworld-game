@@ -595,7 +595,8 @@
           if (!msg) return;
 
           // Add my message to history
-          state.npcChatHistory.push({ sender: 'Bạn', text: msg, isNpc: false });
+          const myName = state.character ? state.character.name : 'Bạn';
+          state.npcChatHistory.push({ sender: myName, text: msg, isNpc: false });
           updateNpcChatBox();
           
           // Send to server

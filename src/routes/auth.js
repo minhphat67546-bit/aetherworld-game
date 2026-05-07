@@ -25,9 +25,9 @@ module.exports = function(getDb, JWT_SECRET, NAMES_POOL, CLASSES, RACES, randomI
         createdAt: new Date()
       });
 
-      // Create initial character
-      const charName = NAMES_POOL[randomInt(0, NAMES_POOL.length - 1)] + '_' + randomInt(10, 99);
-        const rIndex = randomInt(0, RACES.length - 1);
+      // Create initial character with username as character name
+      const charName = username;
+      const rIndex = randomInt(0, RACES.length - 1);
         await db.collection('characters').insertOne({
           userId: result.insertedId.toString(),
           name: charName,
