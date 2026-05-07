@@ -92,7 +92,7 @@ async function connectDB() {
             name: { bsonType: "string", maxLength: 30 },
             class: { 
               bsonType: "string",
-              enum: ['Warrior', 'Mage', 'Rogue', 'Paladin', 'Hunter', 'Priest', 'Necromancer', 'Druid']
+              enum: ['Tanker', 'Mage', 'Assassin', 'Bruiser', 'All-rounder']
             },
             race: { bsonType: "string" },
             level: { bsonType: ["int", "double", "long"], minimum: 1 },
