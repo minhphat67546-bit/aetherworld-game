@@ -65,45 +65,6 @@ const GameEngine = (function () {
   const bloodParticles = [];
 
   function spawnBlood(x, y, isCrit) {
-      const count = isCrit ? 15 : 8;
-      for(let i=0; i<count; i++) {
-          bloodParticles.push({
-              x: x, y: y,
-              vx: (Math.random() - 0.5) * 8,
-              vy: (Math.random() - 0.8) * 8,
-              life: 1.0,
-              size: Math.random() * 4 + 2
-          });
-      }
-  }
-
-  function renderBloodParticles() {
-      for(let i = bloodParticles.length - 1; i >= 0; i--) {
-          const p = bloodParticles[i];
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vy += 0.5; // gravity
-          p.life -= 0.03;
-          
-          if(p.life <= 0) {
-              bloodParticles.splice(i, 1);
-              continue;
-          }
-          
-          ctx.save();
-          ctx.globalAlpha = p.life;
-          ctx.fillStyle = '#ff0000';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-      }
-  }
-
-
-  const bloodParticles = [];
-
-  function spawnBlood(x, y, isCrit) {
     const count = isCrit ? 15 : 8;
     for (let i = 0; i < count; i++) {
       bloodParticles.push({
@@ -910,12 +871,10 @@ const GameEngine = (function () {
     processPendingDamage();
     renderDamageTexts();
     renderBloodParticles();
-    renderBloodParticles();
   }
 
   function drawPlayer(x, y, facing, moving, name, isMain, dead, raceOverride, attacking) {
     const race = raceOverride || (isMain ? playerRace : 'Human');
-    const flipX = (facing === 'left');
 
     if (typeof SpriteSystem !== 'undefined') {
       SpriteSystem.drawPlayer(ctx, x, y, PLAYER_SIZE, race, facing, dead, moving, attacking);
