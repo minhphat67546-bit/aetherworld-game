@@ -22,6 +22,11 @@ app.use(cors());
 app.use(express.json());
 
 const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+if (ai) {
+  console.log('✅ Gemini AI đã được khởi tạo thành công.');
+} else {
+  console.warn('⚠️ Cảnh báo: GEMINI_API_KEY chưa được thiết lập. Tính năng NPC Chat sẽ không hoạt động.');
+}
 
 const server = http.createServer(app);
 const io = new Server(server, {

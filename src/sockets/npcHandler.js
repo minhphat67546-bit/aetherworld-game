@@ -19,19 +19,30 @@ function registerNpcHandlers(io, socket, ai) {
 
       const systemInstruction = npcPrompts[npcId] || `Bạn là một NPC trong thế giới AetherWorld. Tên người chơi là ${player ? player.name : 'Lữ khách'}. Trả lời ngắn gọn bằng tiếng Việt.`;
       
+      console.log(`[AI] Đang gọi Gemini cho NPC: ${npcId}, Model: gemini-1.5-flash`);
+      
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: message,
+        model: 'gemini-1.5-flash',
+        contents: [{ role: 'user', parts: [{ text: message }] }],
         config: {
           systemInstruction: systemInstruction,
           temperature: 0.8,
+          maxOutputTokens: 200,
         }
       });
       
-      socket.emit('npc_chat_response', { npcId, message: response.text });
+      if (response && response.text) {
+        socket.emit('npc_chat_response', { npcId, message: response.text });
+      } else {
+        throw new Error('Không nhận được phản hồi từ AI');
+      }
     } catch (error) {
-      console.error('NPC Chat error:', error);
-      socket.emit('npc_chat_response', { npcId, message: '*Nấc cụt* Xin lỗi, ta đang mệt, hãy quay lại sau...' });
+      console.error('❌ NPC Chat error details:', error);
+      // Gửi thông báo lỗi cụ thể hơn nếu cần
+      const errorMsg = error.message.includes('model not found') 
+        ? 'Lỗi: Không tìm thấy Model AI. Hãy kiểm tra cấu hình.'
+        : '*Nấc cụt* Xin lỗi, ta đang mệt, hãy quay lại sau...';
+      socket.emit('npc_chat_response', { npcId, message: errorMsg });
     }
   });
 
