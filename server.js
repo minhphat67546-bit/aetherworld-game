@@ -102,6 +102,7 @@ async function connectDB() {
             combatRating: { bsonType: ["int", "double", "long"] },
             bossKills: { bsonType: ["int", "double", "long"] },
             lastSeen: { bsonType: "date" },
+            createdAt: { bsonType: "date" },
             
             // TÚI ĐỒ: Là một mảng chứa các object Item
             inventory: {
