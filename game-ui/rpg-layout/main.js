@@ -47,8 +47,8 @@
       });
       const data = await res.json();
       if (!res.ok) { authError.textContent = data.error; return; }
-      localStorage.setItem('aether_token', data.token);
-      localStorage.setItem('aether_user', data.username);
+      sessionStorage.setItem('aether_token', data.token);
+      sessionStorage.setItem('aether_user', data.username);
       state.isLoggedIn = true;
       showView('loading');
       socket.disconnect(); socket.connect();
@@ -64,12 +64,12 @@
   });
 
   $('guest-btn').addEventListener('click', () => {
-    localStorage.removeItem('aether_token'); localStorage.removeItem('aether_user');
+    sessionStorage.removeItem('aether_token'); sessionStorage.removeItem('aether_user');
     showView('loading'); socket.disconnect(); socket.connect();
   });
 
   $('logout-btn').addEventListener('click', () => {
-    localStorage.removeItem('aether_token'); localStorage.removeItem('aether_user');
+    sessionStorage.removeItem('aether_token'); sessionStorage.removeItem('aether_user');
     state.isLoggedIn = false; state.character = null;
     socket.disconnect(); socket.connect();
     showView('auth');
@@ -79,7 +79,7 @@
   socket.on('connect', () => {
     state.connected = true;
     $('status-dot').classList.add('status-dot--online');
-    socket.emit('authenticate', { token: localStorage.getItem('aether_token') });
+    socket.emit('authenticate', { token: sessionStorage.getItem('aether_token') });
   });
   socket.on('disconnect', () => {
     state.connected = false;
@@ -92,7 +92,7 @@
     updatePlayerUI();
     buildInventoryGrid();
     $('online-count').textContent = data.onlineCount + ' Online';
-    const hasToken = localStorage.getItem('aether_token');
+    const hasToken = sessionStorage.getItem('aether_token');
     if (state.view === 'loading' || (state.view === 'auth' && hasToken && data.player.isLoggedIn)) {
       showView('game');
     }
@@ -697,7 +697,7 @@
     if (p === 'settings') {
       return `<div style="display:flex;flex-direction:column;gap:12px">
         <div class="mini-stat"><span class="mini-stat__label">Trạng thái</span><span class="mini-stat__value" style="color:var(--clr-success)">${state.connected?'Đã kết nối':'Mất kết nối'}</span></div>
-        <div class="mini-stat"><span class="mini-stat__label">Tài khoản</span><span class="mini-stat__value">${state.isLoggedIn?(localStorage.getItem('aether_user')||'N/A'):'Khách'}</span></div>
+        <div class="mini-stat"><span class="mini-stat__label">Tài khoản</span><span class="mini-stat__value">${state.isLoggedIn?(sessionStorage.getItem('aether_user')||'N/A'):'Khách'}</span></div>
         <div class="mini-stat"><span class="mini-stat__label">Server</span><span class="mini-stat__value" style="font-size:0.6rem">${SERVER}</span></div>
         ${state.activeZone?`<button onclick="document.getElementById('nav-world').click()" style="padding:10px;border-radius:8px;border:1px solid var(--clr-primary);background:none;color:var(--clr-secondary);cursor:pointer;font-family:var(--font-display)">🗺️ QUAY LẠI BẢN ĐỒ</button>`:''}
       </div>`;
@@ -1088,7 +1088,7 @@
     showTutorialIfFirst();
 
     // Auto-connect
-    const hasToken = localStorage.getItem('aether_token');
+    const hasToken = sessionStorage.getItem('aether_token');
     if (hasToken) { showView('loading'); }
     socket.connect();
 
@@ -1206,7 +1206,7 @@
 
   // ====== TUTORIAL ======
   function showTutorialIfFirst() {
-    if (localStorage.getItem('aether_tutorial_seen')) return;
+    if (sessionStorage.getItem('aether_tutorial_seen')) return;
     const overlay = document.createElement('div');
     overlay.id = 'tutorial-overlay';
     overlay.style.cssText = `
@@ -1248,7 +1248,7 @@
     `;
     document.body.appendChild(overlay);
     overlay.querySelector('#tutorial-close-btn').addEventListener('click', () => {
-      localStorage.setItem('aether_tutorial_seen', '1');
+      sessionStorage.setItem('aether_tutorial_seen', '1');
       overlay.style.opacity = '0';
       overlay.style.transition = 'opacity 0.4s';
       setTimeout(() => overlay.remove(), 400);
