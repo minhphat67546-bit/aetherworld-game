@@ -829,8 +829,8 @@ const GameEngine = (function () {
     // Other players
     Object.values(otherPlayers).forEach(op => {
       const opOffsetX = op.drawOffsetX !== undefined ? op.drawOffsetX : 0;
-      const opOffsetY = op.drawOffsetY !== undefined ? op.drawOffsetY : -20;
-      drawPlayer(op.x + opOffsetX, op.y + opOffsetY, 'right', false, op.name, false, op.isDead, null, op.isAttacking);
+      const opOffsetY = op.drawOffsetY !== undefined ? op.drawOffsetY : 16;
+      drawPlayer(op.x + opOffsetX, op.y + opOffsetY, op.facing || 'right', op.moving || false, op.name, false, op.isDead, op.race, op.isAttacking);
 
       if (DEBUG_MODE) {
         ctx.save();

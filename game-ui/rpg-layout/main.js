@@ -137,7 +137,7 @@
   });
 
   socket.on('player_joined_zone', data => {
-    state.otherPlayers[data.name] = { name:data.name, x:data.x, y:data.y, hp:data.hp, hpMax:data.hpMax };
+    state.otherPlayers[data.name] = { name:data.name, race:data.race, x:data.x, y:data.y, hp:data.hp, hpMax:data.hpMax };
     GameEngine.setOtherPlayers(state.otherPlayers);
     addLog(`⚔️ ${data.name} đã tham gia!`, 'guild');
   });
@@ -150,6 +150,8 @@
     if (state.otherPlayers[data.name]) {
       state.otherPlayers[data.name].x = data.x;
       state.otherPlayers[data.name].y = data.y;
+      if (data.facing) state.otherPlayers[data.name].facing = data.facing;
+      if (data.moving !== undefined) state.otherPlayers[data.name].moving = data.moving;
       GameEngine.setOtherPlayers(state.otherPlayers);
     }
   });
@@ -1059,7 +1061,7 @@
   async function init() {
     await GameEngine.preloadAssets(SERVER);
     GameEngine.init(document.getElementById('gameCanvas'), {
-      onMove: (x,y) => { if (state.activeZone) socket.emit('player_move', {x,y}); },
+      onMove: (x,y) => { if (state.activeZone) { const p = GameEngine.getPlayer(); socket.emit('player_move', {x, y, facing: p.facing, moving: p.moving}); } },
       onAttack: (mobId) => {
         if (!state.activeZone || state.isDead) return false;
         const now = Date.now();

@@ -325,7 +325,7 @@ io.on('connection', async (socket) => {
         if (p.socketId !== socket.id) {
            const pRoom = getRoomName(p, p.socketId, zoneId);
            if (pRoom === player.roomName) {
-              otherPlayers.push({ name: p.name, class: p.class, level: p.level, x: p.x, y: p.y, hp: p.hp, hpMax: p.hpMax });
+              otherPlayers.push({ name: p.name, class: p.class, race: p.race, level: p.level, x: p.x, y: p.y, hp: p.hp, hpMax: p.hpMax });
            }
         }
       });
@@ -347,7 +347,7 @@ io.on('connection', async (socket) => {
     // Notify others in room
     if (zone.type === 'guild' || zone.type === 'city' || player.partyId) {
       socket.to(player.roomName).emit('player_joined_zone', {
-        name: player.name, class: player.class, level: player.level,
+        name: player.name, class: player.class, race: player.race, level: player.level,
         x: player.x, y: player.y, hp: player.hp, hpMax: player.hpMax,
         zoneId,
         playersInZone: getPlayersInZone(zoneId).map(p => p.name)
@@ -398,7 +398,7 @@ io.on('connection', async (socket) => {
     const zone = ZONES[player.currentZone];
     if (zone && (zone.type === 'guild' || zone.type === 'city' || player.partyId)) {
       socket.to(player.roomName).emit('player_moved', {
-        name: player.name, x: pos.x, y: pos.y
+        name: player.name, x: pos.x, y: pos.y, facing: pos.facing, moving: pos.moving
       });
     }
   });
