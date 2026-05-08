@@ -7,7 +7,41 @@ const GEMINI_MODELS = [
   'gemini-2.0-flash-lite',
 ];
 
-async function callGeminiREST(apiKey, message, systemInstruction) {
+async function callAI(apiKey, message, systemInstruction) {
+  if (apiKey.startsWith('gsk_')) {
+    // Groq API
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile', // Dùng model mạnh nhất và nhanh nhất của Groq
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: message }
+          ],
+          temperature: 0.7,
+          max_tokens: 250
+        })
+      });
+      const data = await res.json();
+      if (data.choices && data.choices[0]?.message?.content) {
+        console.log(`[AI] ✅ Groq (llama-3.3-70b) thành công`);
+        return data.choices[0].message.content;
+      } else if (data.error) {
+        console.warn(`[AI] ⚠️ Groq lỗi: ${data.error.message}`);
+      }
+    } catch (err) {
+      console.warn(`[AI] ⚠️ Groq fetch lỗi: ${err.message}`);
+    }
+    return null;
+  }
+
+  // Gemini API (fallback/default)
   for (const model of GEMINI_MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     try {
@@ -67,7 +101,7 @@ function registerNpcHandlers(io, socket, ai) {
 
       const systemInstruction = npcPrompts[npcId] || `Bạn là một NPC trong thế giới AetherWorld. Tên người chơi là ${player ? player.name : 'Lữ khách'}. Trả lời ngắn gọn bằng tiếng Việt.`;
 
-      const text = await callGeminiREST(apiKey, message, systemInstruction);
+      const text = await callAI(apiKey, message, systemInstruction);
 
       if (text) {
         socket.emit('npc_chat_response', { npcId, message: text });
