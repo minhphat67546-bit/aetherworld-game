@@ -1,26 +1,57 @@
 {
   "project": "AetherWorld MMORPG",
-  "version": "1.0.1",
-  "update_date": "2026-05-04",
+  "version": "1.1.0",
+  "update_date": "2026-05-08",
   "changes": {
-    "combat_system": {
-      "damage_formula": "Sát thương thực tế = Sát thương cơ bản * Hệ số kỹ năng * (100 / (100 + Giáp Boss))",
-      "basic_attack_scaling": "Hệ số sát thương đánh thường được phân hóa rõ rệt theo Role (Dwarf: 1.0, Dark Elf: 0.8, Human: 0.6, Orc: 0.5, Light Elf: 0.2).",
-      "basic_attack_cooldown": "Thêm thời gian chờ (cooldown) 1.5 giây cho đòn đánh thường trên UI và chặn độ trễ 1.0 giây ở Backend để chống Auto-click.",
-      "floating_combat_text": "Thêm hiệu ứng hiển thị sát thương bay lên trên Canvas (Chữ trắng/vàng khi đánh Boss, chữ đỏ khi bị Boss đánh trúng)."
+    "v1.1.0_2026-05-08": {
+      "player_visual_sync": {
+        "title": "Sửa lỗi hình ảnh không đồng bộ giữa các người chơi",
+        "drawOffsetY_fix": "Sửa lỗi offset vẽ nhân vật khác (otherPlayers) từ -20 thành 16 để khớp với nhân vật chính, xóa bỏ hiện tượng nhân vật lơ lửng hoặc lún đất.",
+        "race_sync": "Server giờ gửi thông tin chủng tộc (race) của người chơi khác qua các event 'zone_entered' và 'player_joined_zone'. Client render đúng model sprite theo race thay vì mặc định Human.",
+        "facing_and_movement_sync": "Đồng bộ hướng quay mặt (facing) và trạng thái di chuyển (moving) của người chơi khác qua event 'player_moved'. Nhân vật khác giờ hiển thị animation chạy/đứng im và quay trái/phải chính xác.",
+        "files_modified": ["game-ui/rpg-layout/engine.js", "game-ui/rpg-layout/main.js", "server.js"]
+      },
+      "groq_api_support": {
+        "title": "Hỗ trợ Groq API cho NPC Chat",
+        "description": "Hệ thống NPC Chat tự động phát hiện loại API key. Nếu key bắt đầu bằng 'gsk_' sẽ gọi Groq API (model llama-3.3-70b-versatile, tốc độ phản hồi cực nhanh). Nếu key khác sẽ dùng Google Gemini như cũ.",
+        "supported_providers": ["Google Gemini (gemini-2.5-flash, gemini-2.0-flash, gemini-2.0-flash-lite)", "Groq (llama-3.3-70b-versatile)"],
+        "files_modified": ["src/sockets/npcHandler.js"]
+      },
+      "multi_account_support": {
+        "title": "Hỗ trợ đăng nhập nhiều tài khoản trên cùng trình duyệt",
+        "description": "Chuyển toàn bộ từ localStorage sang sessionStorage. Mỗi tab trình duyệt giờ có phiên đăng nhập riêng biệt, cho phép mở 2 tab đăng nhập 2 account khác nhau mà không bị xung đột hay đá nhau.",
+        "trade_off": "Đóng tab sẽ mất phiên đăng nhập (cần đăng nhập lại khi mở tab mới).",
+        "files_modified": ["game-ui/rpg-layout/main.js"]
+      },
+      "ai_inventory_sync": {
+        "title": "Đồng bộ dữ liệu nhân vật vào NPC AI Chatbox",
+        "description": "NPC AI giờ nhận biết đầy đủ thông tin nhân vật gồm: tên, level, class, race, vàng hiện có, boss đã giết, trang bị đang mặc, và toàn bộ túi đồ (gom nhóm theo tên + số lượng).",
+        "merchant_behavior": "Thương nhân AI kiểm tra túi đồ thực tế khi người chơi muốn bán, đưa giá cụ thể bằng con số, và từ chối nếu item không có trong túi.",
+        "elder_behavior": "Trưởng làng AI tham khảo level, boss kills và trang bị để đưa lời khuyên phù hợp.",
+        "guild_manager_behavior": "Quản lý Guild AI đánh giá người chơi dựa trên chỉ số thực tế.",
+        "files_modified": ["src/sockets/npcHandler.js"]
+      }
     },
-    "mana_system": {
-      "mp_consumption": "Kỹ năng tiêu hao Mana được trừ và xác thực trực tiếp trên Backend.",
-      "mp_regeneration": "Hệ thống tự động hồi phục (Regen) Mana định kỳ 1% mỗi giây (cần 100 giây để đầy bình) tạo chiều sâu chiến thuật.",
-      "ui_sync": "Đồng bộ hóa UI thanh Mana liên tục thông qua Socket.IO."
-    },
-    "boss_ai": {
-      "berserk_mode": "Trí tuệ nhân tạo (AI) kích hoạt trạng thái Cơn Thịnh Nộ khi Boss còn dưới 25% máu. Tốc độ tấn công tăng từ 2.5s/đòn lên 1.0s/đòn.",
-      "special_skills": "Khi trong trạng thái Berserk, Boss có 30% tỷ lệ sử dụng tuyệt chiêu Thiên Thạch Rơi (Meteor Rain) gây sát thương gấp 3 lần và tạo hiệu ứng rung màn hình."
-    },
-    "ai_integration": {
-      "reinforcement_learning": "Tích hợp tài liệu thiết kế môi trường mô phỏng (Gymnasium) và thuật toán PPO bằng Ray RLlib để tự động tối ưu hóa chỉ số Boss.",
-      "etl_pipeline": "Phát triển luồng ETL bằng Python (PyMongo, Pandas) để làm sạch dữ liệu lịch sử đấu Boss và xuất ra định dạng Parquet làm đầu vào cho Machine Learning."
+    "v1.0.1_2026-05-04": {
+      "combat_system": {
+        "damage_formula": "Sát thương thực tế = Sát thương cơ bản * Hệ số kỹ năng * (100 / (100 + Giáp Boss))",
+        "basic_attack_scaling": "Hệ số sát thương đánh thường được phân hóa rõ rệt theo Role (Dwarf: 1.0, Dark Elf: 0.8, Human: 0.6, Orc: 0.5, Light Elf: 0.2).",
+        "basic_attack_cooldown": "Thêm thời gian chờ (cooldown) 1.5 giây cho đòn đánh thường trên UI và chặn độ trễ 1.0 giây ở Backend để chống Auto-click.",
+        "floating_combat_text": "Thêm hiệu ứng hiển thị sát thương bay lên trên Canvas (Chữ trắng/vàng khi đánh Boss, chữ đỏ khi bị Boss đánh trúng)."
+      },
+      "mana_system": {
+        "mp_consumption": "Kỹ năng tiêu hao Mana được trừ và xác thực trực tiếp trên Backend.",
+        "mp_regeneration": "Hệ thống tự động hồi phục (Regen) Mana định kỳ 1% mỗi giây (cần 100 giây để đầy bình) tạo chiều sâu chiến thuật.",
+        "ui_sync": "Đồng bộ hóa UI thanh Mana liên tục thông qua Socket.IO."
+      },
+      "boss_ai": {
+        "berserk_mode": "Trí tuệ nhân tạo (AI) kích hoạt trạng thái Cơn Thịnh Nộ khi Boss còn dưới 25% máu. Tốc độ tấn công tăng từ 2.5s/đòn lên 1.0s/đòn.",
+        "special_skills": "Khi trong trạng thái Berserk, Boss có 30% tỷ lệ sử dụng tuyệt chiêu Thiên Thạch Rơi (Meteor Rain) gây sát thương gấp 3 lần và tạo hiệu ứng rung màn hình."
+      },
+      "ai_integration": {
+        "reinforcement_learning": "Tích hợp tài liệu thiết kế môi trường mô phỏng (Gymnasium) và thuật toán PPO bằng Ray RLlib để tự động tối ưu hóa chỉ số Boss.",
+        "etl_pipeline": "Phát triển luồng ETL bằng Python (PyMongo, Pandas) để làm sạch dữ liệu lịch sử đấu Boss và xuất ra định dạng Parquet làm đầu vào cho Machine Learning."
+      }
     }
   }
 }
